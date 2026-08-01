@@ -1,0 +1,27 @@
+Tetrameter
+Copyright 2026 KumoKodo
+
+This product includes software developed by KumoKodo (https://kumokodo.ai).
+
+── Third-party data ─────────────────────────────────────────────────────────
+
+The coefficients in packages/core/src/factors are derived from published
+sources. Each factor carries its source, version and retrieval date in code;
+this notice records the licences.
+
+  ML.ENERGY Benchmark  — model energy measurements across 328 serving
+                         configurations and 24 open-weight models.
+                         https://ml.energy/leaderboard
+
+  Ember, via Our World in Data — electricity generation mix and carbon
+                         intensity by country. CC BY 4.0.
+                         https://ember-energy.org
+
+  LiteLLM model_prices_and_context_window.json — per-model token pricing.
+                         MIT Licence.
+                         https://github.com/BerriAI/litellm
+
+The methodology implemented here follows the Green Software Foundation's
+Software Carbon Intensity specification for AI, and the GHG Protocol Scope 3
+Category 1 treatment of purchased goods and services. Neither organisation
+endorses this implementation.
