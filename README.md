@@ -1,4 +1,4 @@
-# Tetrameter
+# Tetrameter™
 
 **Four measures of AI inference: energy, carbon, water and land, with cost outside them as the same
 consumption priced.** A reference implementation of the Green Software Foundation's Software Carbon
@@ -113,5 +113,6 @@ say so.
 
 Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Note that Apache 2.0 grants no trademark rights (section 6). The code is yours to use and fork;
-"Tetrameter" is not.
+Apache 2.0 grants no trademark rights (section 6). The code is yours to use and fork; the name is
+not. See [TRADEMARK.md](TRADEMARK.md) — in short, "built on Tetrameter" is always fine, calling your
+fork Tetrameter is not.
