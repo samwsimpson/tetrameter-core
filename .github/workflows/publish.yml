@@ -32,9 +32,9 @@ jobs:
     environment: npm-publish
     steps:
       - uses: actions/checkout@v4
+      # No version pin here on purpose: package.json declares packageManager,
+      # and specifying both makes the action fail with "multiple versions".
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
