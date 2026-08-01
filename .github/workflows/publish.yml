@@ -1,0 +1,93 @@
+# Publish to npm via Trusted Publishing (OIDC). No NPM_TOKEN anywhere.
+#
+# Encodes the four traps from the kodori-sdk release, so nobody rediscovers them:
+#
+#   1. `publishConfig.main` is pnpm-only — npm publish ignores it. The real dist
+#      paths live in each package.json, and prepack rebuilds before packing.
+#   2. No `registry-url` on setup-node. With it set, the action writes an .npmrc
+#      containing an empty _authToken, npm picks up the blank credential and
+#      publishes anonymously, and the registry answers 404.
+#   3. npm must be >= 11.5. Node 22 ships 10.x, which signs provenance but has no
+#      OIDC negotiation — identical 404 symptom. Asserted below rather than hoped.
+#   4. --provenance requires a PUBLIC repo. It failed with 422 on the private one.
+#      This repo is public, which is why provenance is on here and was not there.
+#      It is worth having: cryptographic proof the tarball came from the source
+#      people can read, which is the entire argument this library is making.
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - "core-v*"
+      - "sdk-v*"
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Deliberately no registry-url. See trap 2 above.
+
+      - name: Upgrade npm for Trusted Publishing
+        run: npm install -g npm@latest
+
+      - name: Assert npm supports OIDC
+        run: |
+          version="$(npm --version)"
+          major="${version%%.*}"
+          rest="${version#*.}"
+          minor="${rest%%.*}"
+          echo "npm $version"
+          if [ "$major" -lt 11 ] || { [ "$major" -eq 11 ] && [ "$minor" -lt 5 ]; }; then
+            echo "npm >= 11.5 required for Trusted Publishing OIDC; got $version" >&2
+            exit 1
+          fi
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Pick the package from the tag
+        id: pick
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            core-v*) echo "dir=packages/core" >> "$GITHUB_OUTPUT" ;;
+            sdk-v*)  echo "dir=packages/sdk"  >> "$GITHUB_OUTPUT" ;;
+            *) echo "unrecognised tag ${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
+
+      # prepack rebuilds, so this verifies the shape of what will actually ship
+      # rather than the shape of whatever was lying around.
+      - name: Verify the tarball contents
+        working-directory: ${{ steps.pick.outputs.dir }}
+        run: |
+          npm pack --dry-run
+          node -e "
+            const p = require('./package.json');
+            for (const f of ['main', 'types']) {
+              if (!p[f] || !p[f].startsWith('./dist/')) {
+                console.error(\`package.json.\${f} must point into dist/, got \${p[f]}\`);
+                process.exit(1);
+              }
+            }
+            if (p.private) { console.error('refusing to publish a private package'); process.exit(1); }
+            console.log(\`\${p.name}@\${p.version} looks publishable\`);
+          "
+
+      - name: Publish
+        working-directory: ${{ steps.pick.outputs.dir }}
+        run: npm publish --access public --provenance

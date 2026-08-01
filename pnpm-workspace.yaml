@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+
+# pnpm 10 defaults this to false, which sends a semver range for a local package
+# to the registry and fails until it has been published. We keep real semver
+# ranges rather than the workspace: protocol because `npm publish` does not
+# rewrite that protocol the way `pnpm publish` does, and a manifest shipped with
+# "workspace:*" in it is one nobody can install.
+linkWorkspacePackages: true
