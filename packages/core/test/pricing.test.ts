@@ -87,8 +87,12 @@ describe("cost computation", () => {
   });
 
   it("charges cached input at the discounted rate", () => {
+    // Disjoint fields: the same million tokens, sent fresh or read from cache.
+    // This previously set both to 1M, which under the collector's actual
+    // semantics is two million tokens rather than one million of which some
+    // were cached — it encoded the subtraction bug rather than the intent.
     const uncached = callCost(call({ inputTokens: 1_000_000, cachedTokens: 0 }));
-    const cached = callCost(call({ inputTokens: 1_000_000, cachedTokens: 1_000_000 }));
+    const cached = callCost(call({ inputTokens: 0, cachedTokens: 1_000_000 }));
     expect(cached.value).toBeLessThan(uncached.value / 5);
   });
 

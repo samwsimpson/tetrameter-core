@@ -26,7 +26,7 @@ export type { PricingTuple } from "./pricing-data.js";
  *
  * Format: YYYY.MM.PATCH
  */
-export const FACTOR_SET_VERSION = "2026.08.5";
+export const FACTOR_SET_VERSION = "2026.08.6";
 
 export const FACTOR_SET_NOTES = [
   "Model energy comes from the ML.ENERGY Benchmark (328 serving configurations,",
@@ -207,6 +207,23 @@ const RESTATEMENT_ENTRIES: readonly Restatement[] = [
       "it belongs. An explicit outcomeCount still wins. Raised by an integration wiring up " +
       "per-outcome reporting, not by review.",
     materialityEstimate: 0,
+  },
+  {
+    factorId: "pricing.cachedInput",
+    fromVersion: "2026.08.5",
+    toVersion: "2026.08.6",
+    applied: "2026-08-02",
+    reason:
+      "Corrected a field-semantics error, not a coefficient. Cost and energy subtracted cachedTokens " +
+      "from inputTokens, treating cached reads as a subset of input. The collector has always sent " +
+      "them disjoint - its Anthropic adapter maps input_tokens plus cache_creation into inputTokens " +
+      "and cache_read_input_tokens into cachedTokens, deliberately separate because a write does full " +
+      "prefill and a read does not. Two halves of the library disagreed about a field. The effect was " +
+      "silent and one-directional: any turn reading more from cache than it sent fresh clamped to zero " +
+      "uncached input and lost the fresh tokens entirely, which is the normal case once caching works. " +
+      "Measured on a live conversation, 511 fresh tokens against 8,450 cached priced as zero. Affects " +
+      "only calls using prompt caching; every figure without cachedTokens is unchanged.",
+    materialityEstimate: 0.24,
   },
 ];
 

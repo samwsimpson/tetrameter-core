@@ -71,8 +71,23 @@ export function callEnergy(call: CallRecord, opts: ComputeOptions = {}): Quantit
     reasoningRegime,
   );
 
+  /*
+   * `inputTokens` and `cachedTokens` are disjoint, not nested.
+   *
+   * This subtracted one from the other, on the assumption that `inputTokens` was
+   * a total that `cachedTokens` was a part of. The collector has never sent it
+   * that way: its Anthropic adapter maps `input_tokens + cache_creation` into
+   * `inputTokens` and `cache_read_input_tokens` into `cachedTokens` — deliberately
+   * separate, because a cache write does full prefill work and a cache read does
+   * not. Two halves of this library disagreed about what a field meant.
+   *
+   * The consequence was silent and one-directional: a turn reading more from
+   * cache than it sent fresh — the normal case once caching is on — clamped to
+   * zero uncached input and lost the fresh tokens entirely. Measured on a live
+   * conversation, 511 fresh tokens against 8,450 cached read as zero.
+   */
   const cached = call.cachedTokens ?? 0;
-  const uncachedInput = Math.max(0, call.inputTokens - cached);
+  const uncachedInput = call.inputTokens;
   const output = call.outputTokens + (call.reasoningTokens ?? 0);
 
   // Per-1k-token energy, expressed as kWh so everything downstream is in one unit.
@@ -237,10 +252,26 @@ export function callCost(call: CallRecord, opts: ComputeOptions = {}): Quantity 
     return quantity({ value: 0, low: 0, high: 0, unit: "USD", tier: 1, sources: [] });
   }
 
+  // Disjoint, not nested — see the note in callEnergy. Subtracting one from the
+  // other priced fresh input at zero on every cache-read turn.
   const cached = call.cachedTokens ?? 0;
-  const uncachedInput = Math.max(0, call.inputTokens - cached);
+  const uncachedInput = call.inputTokens;
   const output = call.outputTokens + (call.reasoningTokens ?? 0);
 
+  /*
+   * Known understatement: cache *writes* are billed at 1.25x input (2x on the
+   * one-hour TTL), and the collector folds them into `inputTokens` at 1.0x.
+   *
+   * That is a deliberate simplification with a real cost: a turn that writes an
+   * 8,700-token prefix is under-priced by roughly 19%. It matters more than it
+   * used to, because it biases a caching comparison in the flattering direction
+   * — the write turn looks cheaper than billed while the read turns are exact,
+   * so a measured saving comes out larger than it was.
+   *
+   * Fixing it needs a `cacheWriteTokens` field carried end to end, since nothing
+   * downstream can separate a write from ordinary input once they are summed.
+   * Recorded rather than silently tolerated.
+   */
   const value =
     (uncachedInput / 1_000_000) * pricing.inputPer1m +
     (cached / 1_000_000) * (pricing.cachedInputPer1m ?? pricing.inputPer1m) +

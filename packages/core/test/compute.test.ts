@@ -87,7 +87,8 @@ describe("call computation", () => {
   });
 
   it("makes cached tokens dramatically cheaper in energy", () => {
-    const cached = callEnergy(call({ inputTokens: 10_000, cachedTokens: 10_000 }));
+    // The same ten thousand tokens, read from cache rather than sent fresh.
+    const cached = callEnergy(call({ inputTokens: 0, cachedTokens: 10_000 }));
     const uncached = callEnergy(call({ inputTokens: 10_000, cachedTokens: 0 }));
     expect(cached.value).toBeLessThan(uncached.value);
   });
@@ -399,5 +400,52 @@ describe("outcome counting when calls fail", () => {
     // the headline figure gets worse, which is the honest direction.
     expect(withAFailure.outcomes).toBe(succeeded.outcomes);
     expect(withAFailure.sci!.value).toBeGreaterThan(succeeded.sci!.value);
+  });
+});
+
+/*
+ * Cached and fresh input are disjoint.
+ *
+ * Found in live data the day a portfolio product turned prompt caching on: the
+ * engine subtracted cachedTokens from inputTokens, but the collector has always
+ * sent them separately. A turn reading more from cache than it sent fresh -
+ * the normal case once caching works - priced its fresh input at zero.
+ */
+describe("cached input accounting", () => {
+  const c = (over: Partial<CallRecord>): CallRecord => ({
+    id: "c", timestamp: "2026-08-02T17:55:52.000Z", provider: "anthropic",
+    model: "claude-sonnet-4-6", region: "US", inputTokens: 0, outputTokens: 0, ...over,
+  });
+
+  it("charges fresh input even when the cache read is larger", () => {
+    // The measured turn: 511 fresh, 8,450 read from cache.
+    const withCache = callCost(c({ inputTokens: 511, outputTokens: 253, cachedTokens: 8450 }));
+    const freshOnly = callCost(c({ inputTokens: 511, outputTokens: 253 }));
+    // Reading from cache costs something, so the cached turn must exceed the
+    // one that sent the same fresh tokens and read nothing.
+    expect(withCache.value).toBeGreaterThan(freshOnly.value);
+  });
+
+  it("does not treat a large cache read as cancelling the fresh tokens", () => {
+    const a = callCost(c({ inputTokens: 511, outputTokens: 0, cachedTokens: 8450 }));
+    const b = callCost(c({ inputTokens: 0, outputTokens: 0, cachedTokens: 8450 }));
+    expect(a.value).toBeGreaterThan(b.value);
+  });
+
+  it("still makes caching cheaper than sending the same tokens fresh", () => {
+    const cached = callCost(c({ inputTokens: 511, outputTokens: 253, cachedTokens: 8450 }));
+    const uncached = callCost(c({ inputTokens: 8961, outputTokens: 253 }));
+    expect(cached.value).toBeLessThan(uncached.value);
+    // The saving should be large but not total — the fresh tokens and the read
+    // both cost real money.
+    const saving = (uncached.value - cached.value) / uncached.value;
+    expect(saving).toBeGreaterThan(0.6);
+    expect(saving).toBeLessThan(0.95);
+  });
+
+  it("applies the same rule to energy", () => {
+    const a = callEnergy(c({ inputTokens: 511, outputTokens: 253, cachedTokens: 8450 }));
+    const b = callEnergy(c({ inputTokens: 0, outputTokens: 253, cachedTokens: 8450 }));
+    expect(a.value).toBeGreaterThan(b.value);
   });
 });
