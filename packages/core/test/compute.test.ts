@@ -410,6 +410,22 @@ describe("outcome counting when calls fail", () => {
  * engine subtracted cachedTokens from inputTokens, but the collector has always
  * sent them separately. A turn reading more from cache than it sent fresh -
  * the normal case once caching works - priced its fresh input at zero.
+ *
+ * ── Why the tests that existed could not have caught it ─────────────────────
+ *
+ * There were already tests for cached pricing. They passed, and they encoded the
+ * same wrong assumption, and that was not carelessness: while no sender in the
+ * world was writing cachedTokens, "reads are disjoint from input" and "reads are
+ * a subset of input" produce identical answers on every input a test could
+ * construct. The assumption was unfalsifiable until caching started working,
+ * which is the same moment it started mattering.
+ *
+ * That is the nastier class of latent bug - it activates exactly when the
+ * optimisation lands, so the first data seen through it is also the first data
+ * anyone wants to quote. The defence is not more tests of the same shape; it is
+ * writing the fixture from what the *sender* actually emits rather than from
+ * what the field names suggest. The adapter had said these were separate, in a
+ * comment, for as long as it had existed.
  */
 describe("cached input accounting", () => {
   const c = (over: Partial<CallRecord>): CallRecord => ({
