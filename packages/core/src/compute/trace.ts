@@ -57,7 +57,25 @@ export function computeTrace(trace: TraceRecord, opts: ComputeOptions = {}): Tra
     invisibleTokens,
     invisibleShare: totalTokens === 0 ? 0 : invisibleTokens / totalTokens,
     ...(trace.outcome !== undefined ? { outcome: trace.outcome } : {}),
-    outcomeCount: trace.outcomeCount ?? 1,
+    /*
+     * A trace where every call failed produced no outcome.
+     *
+     * The energy still counts — it was burned, and a failed attempt is real
+     * consumption. But counting it as an achieved outcome inflates the
+     * denominator of the one metric we lead with, which makes efficiency look
+     * better precisely when a customer is burning tokens on work that did not
+     * land. That is the flattering direction, and this library exists to not go
+     * that way.
+     *
+     * Every call, not any: a trace that failed once and succeeded on retry did
+     * produce its outcome, and the retry is waste the numerator already carries.
+     *
+     * An explicit `outcomeCount` still wins. A caller who says a trace produced
+     * three outcomes knows something the error field does not express.
+     */
+    outcomeCount:
+      trace.outcomeCount ??
+      (trace.calls.length > 0 && trace.calls.every((c) => c.error !== undefined) ? 0 : 1),
     energy: sum(perCall.map((f) => f.energy), "kWh"),
     carbon: sum(perCall.map((f) => f.carbon), "gCO2e"),
     water: sum(perCall.map((f) => f.water), "L"),

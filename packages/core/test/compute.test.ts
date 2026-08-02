@@ -6,6 +6,8 @@ import {
   callCost,
   callLand,
   computeTrace,
+  rollup,
+  rollupTotal,
   groupIntoTraces,
   sci,
   efficiencyTrend,
@@ -339,5 +341,63 @@ describe("land as the fourth resource", () => {
     // method that produced the energy figure.
     const benchmarked = computeCall(call({ model: "meta-llama/llama-3.1-70b-instruct" }));
     expect(benchmarked.land.tier).toBe(2);
+  });
+});
+
+/*
+ * A failed trace consumed resources and produced nothing.
+ *
+ * Raised by an integration wiring up per-outcome reporting: counting a wholly
+ * failed trace as an achieved outcome inflates the denominator of the metric we
+ * lead with, so efficiency improves exactly when a customer burns tokens on work
+ * that did not land.
+ */
+describe("outcome counting when calls fail", () => {
+  const at = (i: number) => `2026-08-02T05:0${i}:00.000Z`;
+  const ok = (i: number) => ({
+    id: `c${i}`, timestamp: at(i), provider: "anthropic", model: "claude-sonnet-5",
+    region: "US", inputTokens: 100, outputTokens: 50,
+  });
+  const failed = (i: number) => ({ ...ok(i), error: "429 rate limited" });
+
+  it("counts one outcome for a trace that succeeded", () => {
+    expect(computeTrace({ traceId: "t", calls: [ok(1), ok(2)] }).outcomeCount).toBe(1);
+  });
+
+  it("counts no outcome when every call failed", () => {
+    expect(computeTrace({ traceId: "t", calls: [failed(1), failed(2)] }).outcomeCount).toBe(0);
+  });
+
+  it("still counts the outcome when a retry succeeded", () => {
+    // The failure is waste the numerator already carries; the outcome landed.
+    expect(computeTrace({ traceId: "t", calls: [failed(1), ok(2)] }).outcomeCount).toBe(1);
+  });
+
+  it("still charges the energy of a wholly failed trace", () => {
+    const t = computeTrace({ traceId: "t", calls: [failed(1), failed(2)] });
+    // Zero outcomes must not mean zero footprint — the tokens were burned.
+    expect(t.carbon.value).toBeGreaterThan(0);
+    expect(t.energy.value).toBeGreaterThan(0);
+  });
+
+  it("lets an explicit outcomeCount win over the inference", () => {
+    expect(
+      computeTrace({ traceId: "t", outcomeCount: 3, calls: [failed(1), failed(2)] }).outcomeCount,
+    ).toBe(3);
+    expect(
+      computeTrace({ traceId: "t", outcomeCount: 0, calls: [ok(1)] }).outcomeCount,
+    ).toBe(0);
+  });
+
+  it("makes per-outcome carbon worse when work fails, not better", () => {
+    const succeeded = rollupTotal([{ traceId: "a", calls: [ok(1)] }]);
+    const withAFailure = rollupTotal([
+      { traceId: "a", calls: [ok(1)] },
+      { traceId: "b", calls: [failed(2)] },
+    ]);
+    // Same one outcome in both, but the failed attempt adds carbon to it — so
+    // the headline figure gets worse, which is the honest direction.
+    expect(withAFailure.outcomes).toBe(succeeded.outcomes);
+    expect(withAFailure.sci!.value).toBeGreaterThan(succeeded.sci!.value);
   });
 });

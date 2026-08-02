@@ -26,7 +26,7 @@ export type { PricingTuple } from "./pricing-data.js";
  *
  * Format: YYYY.MM.PATCH
  */
-export const FACTOR_SET_VERSION = "2026.08.4";
+export const FACTOR_SET_VERSION = "2026.08.5";
 
 export const FACTOR_SET_NOTES = [
   "Model energy comes from the ML.ENERGY Benchmark (328 serving configurations,",
@@ -191,6 +191,22 @@ const RESTATEMENT_ENTRIES: readonly Restatement[] = [
       "app can pass it without configuring anything. 18 Vercel regions added; 'iad1' now resolves " +
       "to the US average of 384 (-19%), 'cdg1' to France at 41 (-91%).",
     materialityEstimate: -0.19,
+  },
+  {
+    factorId: "outcome.count",
+    fromVersion: "2026.08.4",
+    toVersion: "2026.08.5",
+    applied: "2026-08-02",
+    reason:
+      "A trace whose every call failed was counted as one achieved outcome. The energy is real " +
+      "and still counts, but crediting a wholly failed attempt as an outcome inflates the " +
+      "denominator of the per-outcome metric, so efficiency improved precisely when a customer " +
+      "burned tokens on work that did not land - the flattering direction. It now defaults to " +
+      "zero outcomes when every call carries an error, and one otherwise; a trace that failed and " +
+      "succeeded on retry still counts its outcome, with the retry's waste in the numerator where " +
+      "it belongs. An explicit outcomeCount still wins. Raised by an integration wiring up " +
+      "per-outcome reporting, not by review.",
+    materialityEstimate: 0,
   },
 ];
 

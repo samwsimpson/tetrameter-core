@@ -40,6 +40,27 @@ export interface CallEvent {
   readonly timestamp?: string;
   /** Set when the call failed — recorded, because failed calls still burn tokens. */
   readonly error?: string;
+
+  /**
+   * The outcome this call served, for callers not using `withTrace`.
+   *
+   * A fallback, not the preferred route. `withTrace` is how a multi-call turn
+   * declares one outcome; setting this on each of several calls in a trace is
+   * harmless — outcomes are counted per trace, not per call — but it says
+   * nothing `withTrace` would not say better.
+   *
+   * It is here because it was reachable at runtime and rejected at compile time:
+   * `sanitize()` allows it, `RecordedCall` carries it, and only `CallEvent`
+   * omitted it. An integration hit exactly that and had to widen the type
+   * locally, which is a bug report about this interface rather than about their
+   * code.
+   */
+  readonly outcome?: string;
+  /**
+   * How many outcomes this call's trace produced. Rarely set: the default of one
+   * per trace is right unless a single trace genuinely serves a batch.
+   */
+  readonly outcomeCount?: number;
 }
 
 /** A recorded call: the event plus whatever the ambient context supplied. */

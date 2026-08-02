@@ -56,6 +56,21 @@ export interface CallRecord {
    * inference or a provider that discloses it — and the only route to Tier 3+.
    */
   readonly measuredWh?: number;
+
+  /**
+   * Set when the call failed.
+   *
+   * The tokens still count: a request the provider processed and then rejected
+   * burned real energy, and dropping failures would report a smaller footprint
+   * than was caused. What changes is the *denominator* — a trace whose every
+   * call failed produced no outcome, and crediting it with one makes efficiency
+   * look better exactly when work is being wasted.
+   *
+   * The collector has carried this since the beginning; the engine could not see
+   * it, which is how failed traces came to be counted as successes. Free text,
+   * never content — a status line or provider code, never a response body.
+   */
+  readonly error?: string;
 }
 
 /** A task: every call an agent made to produce one business outcome. */
