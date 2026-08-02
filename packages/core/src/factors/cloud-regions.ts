@@ -169,6 +169,32 @@ export const CLOUD_REGIONS: ReadonlyMap<string, string> = new Map([
   ["newzealandnorth", "NZ"],
   ["chilecentral", "CL"],
   ["mexicocentral", "MX"],
+
+  // ── Vercel ────────────────────────────────────────────────────────────────
+  //
+  // Vercel sets VERCEL_REGION in the function runtime, so an instrumented app
+  // hosted there can pass its region without anyone configuring anything. These
+  // codes are short and provider-specific — `cle1` is not a country code and
+  // never resolves by any other route, so without this block every Vercel-hosted
+  // caller reports the global average.
+  ["arn1", "SE"], // Stockholm
+  ["bom1", "IN"], // Mumbai
+  ["cdg1", "FR"], // Paris
+  ["cle1", "US"], // Cleveland
+  ["cpt1", "ZA"], // Cape Town
+  ["dub1", "IE"], // Dublin
+  ["fra1", "DE"], // Frankfurt
+  ["gru1", "BR"], // Sao Paulo
+  ["hkg1", "HK"], // Hong Kong
+  ["hnd1", "JP"], // Tokyo
+  ["iad1", "US"], // Washington DC — the default, so the most common of all
+  ["icn1", "KR"], // Seoul
+  ["kix1", "JP"], // Osaka
+  ["lhr1", "GB"], // London
+  ["pdx1", "US"], // Portland
+  ["sfo1", "US"], // San Francisco
+  ["sin1", "SG"], // Singapore
+  ["syd1", "AU"], // Sydney
 ]);
 
 /** How many provider region codes we recognise. Asserted in the tests. */

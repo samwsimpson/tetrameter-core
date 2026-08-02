@@ -323,3 +323,18 @@ describe("region resolution", () => {
     }
   });
 });
+
+describe("Vercel regions", () => {
+  it("resolves the codes Vercel puts in VERCEL_REGION", () => {
+    expect(resolveGrid("iad1").gco2ePerKwh).toBe(resolveGrid("US").gco2ePerKwh);
+    expect(resolveGrid("cdg1").gco2ePerKwh).toBe(resolveGrid("FR").gco2ePerKwh);
+    expect(resolveGrid("dub1").gco2ePerKwh).toBe(resolveGrid("IE").gco2ePerKwh);
+    expect(resolveGrid("syd1").gco2ePerKwh).toBe(resolveGrid("AU").gco2ePerKwh);
+  });
+
+  it("does not send them to the global average", () => {
+    for (const r of ["iad1", "fra1", "hnd1", "gru1", "lhr1"]) {
+      expect(resolveGrid(r).zone, r).not.toBe("GLOBAL");
+    }
+  });
+});

@@ -26,7 +26,7 @@ export type { PricingTuple } from "./pricing-data.js";
  *
  * Format: YYYY.MM.PATCH
  */
-export const FACTOR_SET_VERSION = "2026.08.3";
+export const FACTOR_SET_VERSION = "2026.08.4";
 
 export const FACTOR_SET_NOTES = [
   "Model energy comes from the ML.ENERGY Benchmark (328 serving configurations,",
@@ -175,6 +175,21 @@ const RESTATEMENT_ENTRIES: readonly Restatement[] = [
       "nothing had recorded. ~140 GCP, AWS and Azure regions now map to their country, lookup is " +
       "case-insensitive, and both the cloud mapping and any remaining fallback to the global " +
       "average are annotated and surfaced as pack caveats.",
+    materialityEstimate: -0.19,
+  },
+  {
+    factorId: "grid.resolution",
+    fromVersion: "2026.08.3",
+    toVersion: "2026.08.4",
+    applied: "2026-08-01",
+    reason:
+      "Completes the previous entry. 2026.08.3 mapped GCP, AWS and Azure region codes but not " +
+      "Vercel's, which are short and provider-specific — 'iad1' is not a country code and resolves " +
+      "by no other route, so every Vercel-hosted caller still reported the global average of 475 " +
+      "gCO2e/kWh. 'iad1' is Vercel's default region, making it the single most common region code " +
+      "a caller can send. Vercel sets VERCEL_REGION in the function runtime, so an instrumented " +
+      "app can pass it without configuring anything. 18 Vercel regions added; 'iad1' now resolves " +
+      "to the US average of 384 (-19%), 'cdg1' to France at 41 (-91%).",
     materialityEstimate: -0.19,
   },
 ];
