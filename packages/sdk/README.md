@@ -94,6 +94,35 @@ memory leak that surfaces as *our* fault during *their* incident.
 **Failed calls are recorded.** They still burned tokens, and a fan-out that drops
 its failures reports a smaller footprint than it caused.
 
+## One record per provider call, including the ones you gave up on
+
+The rule is **one `record()` per request that left your process**, not one per
+result you kept. It is the invariant integrations break most often, and it breaks
+silently — the footprint simply comes out smaller than reality with nothing
+missing from the output to hint at it.
+
+Two ways it goes wrong, both found in real integrations rather than imagined:
+
+**Failover collapses two calls into one.** A streamed request stalls, the client
+falls back to a non-streaming call, and only the successful one is recorded. But
+the abandoned request had already been accepted — the prompt was processed and
+tokens were generated before anyone stopped reading. That consumption happened.
+Record the abandoned attempt with whatever usage it managed to report, then
+record the retry as its own call. Same for provider fallbacks, hedged requests
+and any "try the next model" path: each attempt is a call.
+
+**Zero tokens is a claim, not a default.** `inputTokens: 0, outputTokens: 0`
+alongside `error` means *the provider reported no usage* — truthful when the
+request was rejected before inference, as a 400 for a malformed request is.
+It is not a placeholder for "the call failed so we don't know". A request
+rejected after the prompt was processed burned real energy, and recording it as
+zero moves that energy out of the inventory entirely. If usage is unavailable but
+the call reached inference, record the token counts you sent rather than nothing.
+
+The distinction matters because these are the calls nobody is watching. A failed
+request produces no user-visible output, so an integration can drop it for months
+and the only symptom is a carbon figure that looks slightly better than it should.
+
 ## Two bugs the build caught
 
 - **`MultiSink` died on a synchronous throw.** `Promise.allSettled` only catches
