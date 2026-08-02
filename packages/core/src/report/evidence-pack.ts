@@ -57,6 +57,21 @@ export interface EvidencePackOptions extends ComputeOptions {
   readonly breakdowns?: readonly Dimension[];
   /** Functional unit name, e.g. "support ticket resolved". */
   readonly functionalUnit?: string;
+  /**
+   * Limitations the caller knows and the engine cannot.
+   *
+   * Everything else in `caveats` is derived from the data, which is the property
+   * that makes the section trustworthy — nobody has to remember to write it
+   * down. But some limitations are only visible outside the library: that a
+   * period mixes production traffic with a developer's test runs, that a
+   * subsystem is not yet instrumented, that a month is partial because
+   * collection began mid-way.
+   *
+   * These are appended rather than merged into the derivation, and they belong
+   * in the document rather than in the page around it — a limitation that
+   * disappears when the pack is saved as a PDF is not disclosed, it is decorated.
+   */
+  readonly additionalCaveats?: readonly string[];
 }
 
 export interface EvidencePack {
@@ -306,7 +321,15 @@ export function buildEvidencePack(
     methodology: FACTOR_SET_NOTES,
   };
 
-  return { ...base, caveats: generateCaveats(base, factorRegister) };
+  // Caller-supplied limitations go last: the derived ones are about the method,
+  // and a reader working down the list should reach "and here is what is odd
+  // about this particular period" after understanding how the numbers were made.
+  const caveats = [
+    ...generateCaveats(base, factorRegister),
+    ...(opts.additionalCaveats ?? []).filter((c) => c.trim().length > 0),
+  ];
+
+  return { ...base, caveats };
 }
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;

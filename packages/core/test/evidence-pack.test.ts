@@ -237,3 +237,30 @@ describe("region caveats", () => {
     );
   });
 });
+
+describe("caller-supplied caveats", () => {
+  const pack = (extra?: readonly string[]) =>
+    buildEvidencePack([{ traceId: "t", outcome: "x", calls: [call()] }], {
+      entity: "X",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      breakdowns: [],
+      ...(extra ? { additionalCaveats: extra } : {}),
+    });
+
+  it("appends them to the derived ones rather than replacing them", () => {
+    const base = pack().caveats;
+    const withExtra = pack(["Traffic in this period includes developer test runs."]).caveats;
+    expect(withExtra.length).toBe(base.length + 1);
+    expect(withExtra.slice(0, base.length)).toEqual(base);
+    expect(withExtra.at(-1)).toContain("developer test runs");
+  });
+
+  it("ignores blank entries so an empty input cannot pad the section", () => {
+    expect(pack(["", "   "]).caveats).toEqual(pack().caveats);
+  });
+
+  it("changes nothing when omitted", () => {
+    expect(pack().caveats).toEqual(pack([]).caveats);
+  });
+});
