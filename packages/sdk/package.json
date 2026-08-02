@@ -29,7 +29,7 @@
   },
   "sideEffects": false,
   "devDependencies": {
-    "@kumokodo/tetrameter-core": "^0.1.0"
+    "@kumokodo/tetrameter-core": "workspace:*"
   },
   "peerDependencies": {
     "@kumokodo/tetrameter-core": "*"

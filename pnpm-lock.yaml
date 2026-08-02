@@ -23,7 +23,7 @@ importers:
   packages/sdk:
     devDependencies:
       '@kumokodo/tetrameter-core':
-        specifier: ^0.1.0
+        specifier: workspace:*
         version: link:../core
 
 packages:
