@@ -33,6 +33,7 @@
 
 import type { FactorRef } from "../provenance.js";
 import type { GridSignal } from "../types.js";
+import { zoneForCloudRegion } from "./cloud-regions.js";
 import {
   GRID_ZONES,
   GRID_SOURCE,
@@ -212,9 +213,44 @@ export interface ResolvedGrid {
  * implies rather than discovering it later.
  */
 function lookup(zone: string | undefined): GridFactor {
-  const key = zone ?? DEFAULT_ZONE;
+  const raw = zone?.trim();
+  if (!raw) return unlocated(undefined);
+
+  // Zone codes are conventionally upper-case, and callers paste whatever their
+  // configuration holds. Case-sensitivity here meant "fr" silently became the
+  // global average while "FR" resolved to France — a 10x difference decided by
+  // the shift key, with nothing anywhere reporting that it happened.
+  const key = raw.toUpperCase();
   const exact = GRID.get(key);
   if (exact) return exact;
+
+  /*
+   * Cloud region codes, before the sub-national split.
+   *
+   * Order matters. `us-east-1` and `eu-west-1` both contain a dash, so the
+   * sub-national branch below would have taken them first, looked for zones
+   * "US" and "EU", and resolved an AWS Ireland region to the United States —
+   * arriving at a wrong answer while reporting the sub-national caveat, which
+   * is worse than arriving at the global average honestly.
+   */
+  const cloud = zoneForCloudRegion(raw);
+  if (cloud) {
+    const zoneFactor = GRID.get(cloud);
+    if (zoneFactor) {
+      return {
+        ...zoneFactor,
+        zone: raw,
+        ref: {
+          ...zoneFactor.ref,
+          note:
+            `Resolved from cloud region "${raw}" to country-level "${zoneFactor.zone}". We hold ` +
+            `country annual averages only, so this does not reflect the specific grid serving ` +
+            `that region, which can differ substantially from the national average. ` +
+            `${zoneFactor.ref.note ?? ""}`,
+        },
+      };
+    }
+  }
 
   const dash = key.indexOf("-");
   if (dash > 0) {
@@ -222,11 +258,11 @@ function lookup(zone: string | undefined): GridFactor {
     if (parent) {
       return {
         ...parent,
-        zone: key,
+        zone: raw,
         ref: {
           ...parent.ref,
           note:
-            `Resolved from sub-national zone "${key}" to country-level "${parent.zone}" — we hold ` +
+            `Resolved from sub-national zone "${raw}" to country-level "${parent.zone}" — we hold ` +
             `country annual averages only, and sub-national grids can differ substantially. ` +
             `Sub-national resolution requires the live Electricity Maps adapter. ` +
             `${parent.ref.note ?? ""}`,
@@ -235,7 +271,40 @@ function lookup(zone: string | undefined): GridFactor {
     }
   }
 
-  return GRID.get(DEFAULT_ZONE)!;
+  return unlocated(raw);
+}
+
+/**
+ * The global average, carrying a note saying why we are using it.
+ *
+ * This path used to return the default silently, which is the one behaviour a
+ * measurement library must never have: an unrecognised region produced a
+ * confident-looking figure indistinguishable from a located one, and the
+ * evidence pack could not disclose the substitution because nothing recorded
+ * that it had happened. The sub-national branch above had always annotated its
+ * fallback; this one simply had not, and the inconsistency hid it.
+ *
+ * We annotate rather than throw. Throwing would discard live telemetry over a
+ * configuration typo, which loses real data to punish a small error — and the
+ * global average is a defensible figure for a workload of genuinely unknown
+ * location. What is not defensible is failing to say so.
+ */
+function unlocated(attempted: string | undefined): GridFactor {
+  const global = GRID.get(DEFAULT_ZONE)!;
+  return {
+    ...global,
+    ref: {
+      ...global.ref,
+      note:
+        (attempted
+          ? `Region "${attempted}" was not recognised as a grid zone or cloud region code, so the ` +
+            `global average was used. The true figure depends on where the workload actually ran ` +
+            `and may differ severalfold in either direction. `
+          : `No region was supplied, so the global average was used. The true figure depends on ` +
+            `where the workload actually ran and may differ severalfold in either direction. `) +
+        `${global.ref.note ?? ""}`,
+    },
+  };
 }
 
 export function resolveGrid(

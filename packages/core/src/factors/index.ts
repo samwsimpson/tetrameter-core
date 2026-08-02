@@ -13,6 +13,7 @@ export * from "./normalize.js";
 export * from "./mlenergy.js";
 export * from "./models.js";
 export * from "./grid.js";
+export * from "./cloud-regions.js";
 export * from "./grid-providers.js";
 export type { GridZoneRow } from "./grid-data.js";
 export * from "./overhead.js";
@@ -25,7 +26,7 @@ export type { PricingTuple } from "./pricing-data.js";
  *
  * Format: YYYY.MM.PATCH
  */
-export const FACTOR_SET_VERSION = "2026.08.2";
+export const FACTOR_SET_VERSION = "2026.08.3";
 
 export const FACTOR_SET_NOTES = [
   "Model energy comes from the ML.ENERGY Benchmark (328 serving configurations,",
@@ -156,6 +157,25 @@ const RESTATEMENT_ENTRIES: readonly Restatement[] = [
       "divided by output tokens, so a typical prompt's prefill is already amortised in. The " +
       "previous ratio double-counted it. The remaining 0.05 covers input beyond a typical prompt.",
     materialityEstimate: -0.08,
+  },
+  {
+    factorId: "grid.resolution",
+    fromVersion: "2026.08.2",
+    toVersion: "2026.08.3",
+    applied: "2026-08-01",
+    reason:
+      "Defect in input matching, not in any coefficient. Region lookup was exact-match and " +
+      "case-sensitive against ISO zone codes, so every cloud provider region code — the string " +
+      "callers actually hold in their configuration — missed and fell through to the global " +
+      "average of 475 gCO2e/kWh. 'us-central1' was reported at 475 against a US average of 384; " +
+      "'europe-west1' at 475 against a Belgian grid of 150, an overstatement of more than " +
+      "threefold. 'fr' resolved to the global average while 'FR' resolved to France. Worse than " +
+      "the error itself, the fallback was silent: the sub-national path had always annotated its " +
+      "coarsening, this one did not, so the evidence pack could not disclose a substitution " +
+      "nothing had recorded. ~140 GCP, AWS and Azure regions now map to their country, lookup is " +
+      "case-insensitive, and both the cloud mapping and any remaining fallback to the global " +
+      "average are annotated and surfaced as pack caveats.",
+    materialityEstimate: -0.19,
   },
 ];
 

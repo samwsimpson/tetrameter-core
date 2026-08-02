@@ -13,6 +13,7 @@ import {
   RESTATEMENTS,
 } from "../src/index.js";
 import { MIN_OBSERVATION_YEAR } from "../src/factors/grid-data.js";
+import { CLOUD_REGIONS } from "../src/factors/cloud-regions.js";
 
 const ESTIMATED = { allowEstimatedMarginal: true };
 
@@ -258,6 +259,67 @@ describe("land — the fourth resource", () => {
     // band here would mean the boundary problem had been quietly averaged away.
     for (const z of GRID_ZONES.filter((x) => x.landCm2PerKwh !== null).slice(0, 40)) {
       expect(z.landHigh! / z.landLow!).toBeGreaterThan(1.5);
+    }
+  });
+});
+
+/*
+ * Region resolution.
+ *
+ * These exist because the library silently answered "475 gCO2e/kWh" for every
+ * cloud region code anyone actually passes it. `us-central1` read as the global
+ * average rather than the US grid, `europe-west1` as the global average rather
+ * than Belgium, and nothing in the output distinguished those from a located
+ * figure. The bug was invisible precisely because the wrong answer is a
+ * plausible number.
+ */
+describe("region resolution", () => {
+  it("maps cloud region codes to the country they sit in", () => {
+    expect(resolveGrid("us-central1").gco2ePerKwh).toBe(resolveGrid("US").gco2ePerKwh);
+    expect(resolveGrid("europe-west9").gco2ePerKwh).toBe(resolveGrid("FR").gco2ePerKwh);
+    expect(resolveGrid("eu-west-1").gco2ePerKwh).toBe(resolveGrid("IE").gco2ePerKwh);
+    expect(resolveGrid("westeurope").gco2ePerKwh).toBe(resolveGrid("NL").gco2ePerKwh);
+  });
+
+  it("does not let the sub-national split capture dashed cloud regions", () => {
+    // "eu-west-1" splitting on the first dash yields "EU", which is not a zone;
+    // the danger was "us-east-1" resolving via "US" and looking correct while
+    // "eu-west-1" quietly did the same thing and was not.
+    expect(resolveGrid("eu-west-1").gco2ePerKwh).not.toBe(resolveGrid("US").gco2ePerKwh);
+    expect(resolveGrid("eu-west-3").gco2ePerKwh).toBe(resolveGrid("FR").gco2ePerKwh);
+  });
+
+  it("is case-insensitive", () => {
+    expect(resolveGrid("fr").gco2ePerKwh).toBe(resolveGrid("FR").gco2ePerKwh);
+    expect(resolveGrid("us-CENTRAL1").gco2ePerKwh).toBe(resolveGrid("US").gco2ePerKwh);
+  });
+
+  it("still resolves sub-national zones to their country, with the note", () => {
+    expect(resolveGrid("US-CAISO").gco2ePerKwh).toBe(resolveGrid("US").gco2ePerKwh);
+    expect(resolveGrid("US-CAISO").ref.note).toContain("sub-national");
+  });
+
+  it("records that an unrecognised region fell back, rather than falling back silently", () => {
+    const bogus = resolveGrid("not-a-place");
+    expect(bogus.gco2ePerKwh).toBe(resolveGrid("GLOBAL").gco2ePerKwh);
+    expect(bogus.ref.note).toContain("global average was used");
+    expect(bogus.ref.note).toContain("not-a-place");
+  });
+
+  it("distinguishes no region supplied from a region it could not place", () => {
+    expect(resolveGrid(undefined).ref.note).toContain("No region was supplied");
+    expect(resolveGrid("").ref.note).toContain("No region was supplied");
+    expect(resolveGrid("   ").ref.note).toContain("No region was supplied");
+    expect(resolveGrid("zzz").ref.note).toContain("not recognised");
+  });
+
+  it("annotates a cloud-mapped factor so the pack can disclose the coarsening", () => {
+    expect(resolveGrid("us-central1").ref.note).toContain("from cloud region");
+  });
+
+  it("every mapped cloud region points at a zone that exists", () => {
+    for (const [region, zone] of CLOUD_REGIONS) {
+      expect(GRID.get(zone), `${region} -> ${zone}`).toBeDefined();
     }
   });
 });

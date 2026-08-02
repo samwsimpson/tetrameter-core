@@ -192,3 +192,48 @@ describe("rendered markdown", () => {
     }
   });
 });
+
+describe("region caveats", () => {
+  // `exactOptionalPropertyTypes` means "no region" has to be an absent key, not
+  // an explicit undefined - which is also the case being tested, so the fixture
+  // strips the helper's default rather than overwriting it.
+  const mk = (region?: string) => {
+    const { region: _default, ...base } = call({ id: "a" });
+    return {
+      traceId: "t" + region,
+      outcome: "chat answered",
+      calls: [region === undefined ? base : { ...base, region }],
+    };
+  };
+  const packFor = (...regions: (string | undefined)[]) =>
+    buildEvidencePack(regions.map(mk), {
+      entity: "X",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      breakdowns: [],
+    });
+
+  it("discloses that a figure rests on the global average", () => {
+    const c = packFor(undefined).caveats.join(" ");
+    expect(c).toContain("measured against the global average");
+  });
+
+  it("discloses an unrecognised region the same way as a missing one", () => {
+    expect(packFor("not-a-place").caveats.join(" ")).toContain("measured against the global average");
+  });
+
+  it("says nothing about the global average when every region resolved", () => {
+    expect(packFor("FR", "us-central1").caveats.join(" ")).not.toContain(
+      "measured against the global average",
+    );
+  });
+
+  it("discloses cloud-region coarsening, counting regions rather than factor refs", () => {
+    // Each region emits both a grid-intensity and a land ref; counting refs
+    // reported one region as two.
+    expect(packFor("us-central1").caveats.join(" ")).toContain("1 region(s) were resolved from a cloud");
+    expect(packFor("us-central1", "europe-west1").caveats.join(" ")).toContain(
+      "2 region(s) were resolved from a cloud",
+    );
+  });
+});

@@ -167,11 +167,50 @@ function generateCaveats(
     );
   }
 
-  const subNational = factors.filter((f) => f.note?.includes("sub-national")).length;
+  /*
+   * Count regions, not factor references.
+   *
+   * Each resolved region emits two refs — the grid intensity and the land-use
+   * factor derived from the same zone — so counting refs reported one region as
+   * "2 grid factor(s)". An inflated count in a document whose purpose is
+   * accuracy is a small error that invites doubt about the large numbers.
+   */
+  const regionsWhere = (match: string): number =>
+    new Set(
+      factors.filter((f) => f.note?.includes(match)).map((f) => f.id.replace(/\.land$/, "")),
+    ).size;
+
+  const subNational = regionsWhere("sub-national");
   if (subNational > 0) {
     out.push(
-      `${subNational} grid factor(s) were resolved from a sub-national zone to country level. ` +
+      `${subNational} region(s) were resolved from a sub-national zone to country level. ` +
         `Sub-national grids can differ substantially from the national average.`,
+    );
+  }
+
+  const cloudMapped = regionsWhere("from cloud region");
+  if (cloudMapped > 0) {
+    out.push(
+      `${cloudMapped} region(s) were resolved from a cloud provider's region code to the ` +
+        `country that region sits in. The grid actually serving a given data centre can differ ` +
+        `substantially from its national average.`,
+    );
+  }
+
+  /*
+   * Unlocated consumption is a limitation about the *inputs*, not the method,
+   * and it is the one a reader is least able to infer for themselves. A figure
+   * computed on the global average looks identical to one computed on a located
+   * grid; only this line distinguishes them.
+   */
+  const unlocated = regionsWhere("global average was used");
+  if (unlocated > 0) {
+    out.push(
+      `Consumption was measured against the global average because no region was supplied or the ` +
+        `region given was not recognised. National grid intensities range from under ` +
+        `30 gCO₂e/kWh to over 600, so these figures carry error far exceeding the stated band. ` +
+        `Supplying the region each workload runs in is the single highest-value correction ` +
+        `available to this inventory.`,
     );
   }
 

@@ -267,6 +267,7 @@ reproduce the number exactly.
 | `grid.*` | 2026.07.0 → 2026.08.0 | +5% | 8 hand-written zones → ~211 country zones from Ember via OWID. The previous marginal figures were invented outright; they are now inferred from real fossil mix, flagged as estimates, and gated behind an opt-in. Zones under 5% fossil now return nothing. |
 | `pricing.*` | 2026.07.0 → 2026.08.0 | −65% | Four hand-written stubs replaced with the LiteLLM catalogue. The stubs priced the large class at $15/$75 per 1M against Opus 5's actual $5/$25 — a threefold overstatement that inflated every derived savings figure. |
 | `model.prefillRatio` | 2026.07.0 → 2026.08.0 | −8% | Reduced 0.12–0.15 → 0.05. Baseline prefill is already amortised into the source figure. |
+| `grid.*` (resolution) | 2026.08.2 → 2026.08.3 | −19% to −68% for cloud-hosted callers | Region resolution was exact-match and case-sensitive, so every cloud provider region code fell through to the global average of 475 gCO₂e/kWh. `us-central1` read 475 against a US average of 384 (−19% on restatement); `europe-west1` read 475 against a Belgian grid of 150 (−68%). ~140 GCP, AWS and Azure region codes now map to the country they sit in, and lookup is case-insensitive. **No coefficient changed** — this is a defect in how inputs were matched to existing coefficients. |
 
 Machine-readable in `RESTATEMENTS` (see `factors/index.ts`), so a report can cite it mechanically
 rather than someone remembering to update a wiki.
