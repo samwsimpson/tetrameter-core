@@ -145,13 +145,21 @@ describe("cost computation", () => {
   });
 
   it("prices a sender that does not split writes out exactly as before", () => {
-    // Non-breaking by construction: absent means the writes are still inside
-    // inputTokens at 1.0x, which is every row stored before this change and
+    // Non-breaking by construction: with no cacheWriteTokens the writes are still
+    // inside inputTokens at 1.0x, which is every row stored before this change and
     // every sender that has not upgraded.
-    const before = callCost(call({ inputTokens: 1_000_000 }));
-    const after = callCost(call({ inputTokens: 1_000_000, cacheWriteTokens: undefined }));
-    expect(after.value).toBe(before.value);
-    expect(after.high).toBe(before.high);
+    //
+    // Asserted against the absolute figures rather than against another call with
+    // the field set to undefined — that comparison was vacuous, and it also could
+    // not compile under exactOptionalPropertyTypes, which is how CI caught it.
+    const legacy = callCost(call({ inputTokens: 1_000_000 }));
+    // claude-sonnet-5 at $2 per 1M input, no premium applied to tokens never
+    // declared as a write.
+    expect(legacy.value).toBeCloseTo(2.0, 6);
+    // And the ceiling must not widen. The one-hour TTL raised `high` above
+    // `value` for calls that DO carry a write; a call without one has to keep the
+    // old band, where list price is the ceiling.
+    expect(legacy.high).toBe(legacy.value);
   });
 
   it("attaches a citable pricing source", () => {
