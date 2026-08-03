@@ -442,6 +442,16 @@ describe("cached input accounting", () => {
     expect(withCache.value).toBeGreaterThan(freshOnly.value);
   });
 
+  it("charges a cache write the same ENERGY as fresh input, whatever the bill says", () => {
+    // The premium is a billing decision, not a physical one — a write does the
+    // full prefill either way. Splitting cacheWriteTokens out of inputTokens must
+    // therefore not quietly reduce anybody's measured energy, which is the
+    // failure mode that would have made this change look like an improvement.
+    const folded = callEnergy(c({ inputTokens: 9_000, outputTokens: 100 }));
+    const split = callEnergy(c({ inputTokens: 300, cacheWriteTokens: 8_700, outputTokens: 100 }));
+    expect(split.value).toBeCloseTo(folded.value, 12);
+  });
+
   it("does not treat a large cache read as cancelling the fresh tokens", () => {
     const a = callCost(c({ inputTokens: 511, outputTokens: 0, cachedTokens: 8450 }));
     const b = callCost(c({ inputTokens: 0, outputTokens: 0, cachedTokens: 8450 }));

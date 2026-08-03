@@ -21,6 +21,15 @@ export interface CallEvent {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedTokens?: number;
+  /**
+   * Tokens written into the prompt cache. Disjoint from `inputTokens` and
+   * `cachedTokens`, because a provider prices all three differently — a write
+   * costs 1.25x input on Anthropic's five-minute TTL and 2x on the one-hour one.
+   * Folded into `inputTokens`, as adapters did before this field, a write turn
+   * reads cheaper than billed and any caching saving measured against it comes
+   * out too large.
+   */
+  readonly cacheWriteTokens?: number;
   /** Where the provider reports them separately. */
   readonly reasoningTokens?: number;
   /** Grid zone, where knowable. Most commercial APIs do not disclose it. */

@@ -42,6 +42,8 @@ export interface AiSdkResultLike {
     readonly promptTokens?: number;
     readonly completionTokens?: number;
     readonly cachedInputTokens?: number;
+    /** Anthropic through the AI SDK. Priced at a premium, so kept separate. */
+    readonly cacheCreationInputTokens?: number;
     readonly reasoningTokens?: number;
     readonly totalTokens?: number;
     /**
@@ -114,6 +116,9 @@ export function recordAiSdkResult(result: AiSdkResultLike, opts: AiSdkRecordOpti
     inputTokens: u?.inputTokens ?? u?.promptTokens ?? u?.tokens ?? 0,
     outputTokens: u?.outputTokens ?? u?.completionTokens ?? 0,
     ...(u?.cachedInputTokens !== undefined ? { cachedTokens: u.cachedInputTokens } : {}),
+    ...(u?.cacheCreationInputTokens !== undefined
+      ? { cacheWriteTokens: u.cacheCreationInputTokens }
+      : {}),
     ...(u?.reasoningTokens !== undefined ? { reasoningTokens: u.reasoningTokens } : {}),
     ...(billed !== undefined ? { billedCostUsd: billed } : {}),
   });

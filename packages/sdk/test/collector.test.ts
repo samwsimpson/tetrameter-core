@@ -251,9 +251,12 @@ describe("adapters", () => {
     expect(sink.calls[0]?.error).toContain("provider outage");
   });
 
-  it("counts Anthropic cache CREATION as input, not as a cached saving", async () => {
-    // Cache writes are billed at a premium and do full prefill work. Folding them
-    // into cachedTokens would make a cache write look like a discount.
+  it("keeps Anthropic's three token buckets apart, because they are priced three ways", async () => {
+    // A write is not a saving and it is not ordinary input either. Folded into
+    // cachedTokens it would look like a discount; folded into inputTokens — which
+    // is what this adapter did until 0.2.2 — it is priced at 1.0x when the bill
+    // says 1.25x, so the write turn reads cheaper than it was and any caching
+    // saving measured against it comes out too large.
     recordAnthropicMessage({
       model: "claude-sonnet-5",
       usage: {
@@ -264,7 +267,23 @@ describe("adapters", () => {
       },
     });
     await collector.flush();
-    expect(sink.calls[0]).toMatchObject({ inputTokens: 1000, cachedTokens: 50 });
+    expect(sink.calls[0]).toMatchObject({
+      inputTokens: 100,
+      cacheWriteTokens: 900,
+      cachedTokens: 50,
+    });
+  });
+
+  it("omits cacheWriteTokens entirely when the provider reports no write", async () => {
+    // Absent must stay absent rather than becoming 0: the engine treats a missing
+    // field as "this sender does not split writes out" and prices exactly as it
+    // did before, which is what keeps the change non-breaking.
+    recordAnthropicMessage({
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 100, output_tokens: 20 },
+    });
+    await collector.flush();
+    expect(sink.calls[0]).not.toHaveProperty("cacheWriteTokens");
   });
 
   it("extracts usage from every provider dialect", () => {

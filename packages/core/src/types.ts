@@ -35,6 +35,25 @@ export interface CallRecord {
   /** Tokens served from cache — billed differently and far cheaper in energy. */
   readonly cachedTokens?: number;
   /**
+   * Tokens written *into* the cache on this call, where the sender separates
+   * them. Disjoint from both `inputTokens` and `cachedTokens`.
+   *
+   * A write is not ordinary input. It does the full prefill work — so it costs
+   * the same energy as fresh input — and providers bill it at a premium:
+   * Anthropic charges 1.25x input on the default five-minute TTL and 2x on the
+   * one-hour one. Folded into `inputTokens` at 1.0x, as every sender did before
+   * this field existed, a write turn reads cheaper than it was billed while the
+   * read turns that follow are exact. A measured caching saving therefore comes
+   * out larger than it really was — an error in the flattering direction, under
+   * the one number this product publishes a case study about.
+   *
+   * Absent means the sender does not separate it, and its writes are still inside
+   * `inputTokens` at 1.0x. That is the old behaviour, unchanged, and it cannot be
+   * corrected after the fact: once summed, nothing downstream can tell a write
+   * from ordinary input.
+   */
+  readonly cacheWriteTokens?: number;
+  /**
    * Reasoning tokens, where the provider reports them. These are the tokens you
    * are billed for but cannot inspect (arXiv:2505.18471), and on reasoning models
    * they dominate the footprint.

@@ -34,28 +34,34 @@ export interface AnthropicRecordOptions extends Partial<Omit<CallEvent, "model">
 /**
  * Record an Anthropic message response.
  *
- * Note `cache_creation_input_tokens` is deliberately NOT folded into
- * `cachedTokens`. Cache *creation* is billed at a premium and does full prefill
- * work; cache *reads* are the cheap ones. Merging them would make a cache write
- * look like a saving, which is backwards.
+ * The three token buckets are kept apart, because a provider prices them three
+ * different ways. `cache_read_input_tokens` is the cheap one. `input_tokens` is
+ * ordinary. `cache_creation_input_tokens` is the *expensive* one — 1.25x input
+ * on the five-minute TTL, 2x on the one-hour — and it used to be folded into
+ * `inputTokens` at 1.0x, which under-priced a write turn by around 19% while
+ * leaving the read turns that followed exact. That is the wrong direction: it
+ * makes a measured caching saving look bigger than it was.
  */
 export function recordAnthropicMessage(
   response: AnthropicMessageLike,
   opts: AnthropicRecordOptions = {},
 ): void {
   const u = response.usage;
-  const cacheCreation = u?.cache_creation_input_tokens ?? 0;
 
   record({
     ...opts,
     model: opts.model ?? response.model ?? "unknown",
     provider: opts.provider ?? "anthropic",
-    // Cache creation counts as ordinary input: it is billed at a premium and does
-    // the full prefill. Only cache reads are discounted.
-    inputTokens: (u?.input_tokens ?? 0) + cacheCreation,
+    // Fresh input only. Writes go to their own field so the engine can price the
+    // premium; the energy side adds them back, because a write is a full prefill
+    // and costs the same electricity as ordinary input regardless of billing.
+    inputTokens: u?.input_tokens ?? 0,
     outputTokens: u?.output_tokens ?? 0,
     ...(u?.cache_read_input_tokens !== undefined
       ? { cachedTokens: u.cache_read_input_tokens }
+      : {}),
+    ...(u?.cache_creation_input_tokens !== undefined
+      ? { cacheWriteTokens: u.cache_creation_input_tokens }
       : {}),
   });
 }

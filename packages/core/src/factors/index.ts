@@ -26,7 +26,7 @@ export type { PricingTuple } from "./pricing-data.js";
  *
  * Format: YYYY.MM.PATCH
  */
-export const FACTOR_SET_VERSION = "2026.08.6";
+export const FACTOR_SET_VERSION = "2026.08.7";
 
 export const FACTOR_SET_NOTES = [
   "Model energy comes from the ML.ENERGY Benchmark (328 serving configurations,",
@@ -224,6 +224,28 @@ const RESTATEMENT_ENTRIES: readonly Restatement[] = [
       "Measured on a live conversation, 511 fresh tokens against 8,450 cached priced as zero. Affects " +
       "only calls using prompt caching; every figure without cachedTokens is unchanged.",
     materialityEstimate: 0.24,
+  },
+  {
+    factorId: "pricing.cacheWrite",
+    fromVersion: "2026.08.6",
+    toVersion: "2026.08.7",
+    applied: "2026-08-03",
+    reason:
+      "Cache writes are now priced at their premium instead of as ordinary input. Anthropic bills a " +
+      "write at 1.25x input on the default five-minute TTL and 2x on the one-hour one; every adapter " +
+      "folded cache_creation_input_tokens into inputTokens at 1.0x, so a write turn was under-priced " +
+      "by roughly 19% while the cache-read turns following it were exact. The bias was " +
+      "one-directional and flattering: a caching saving measured against an under-priced write comes " +
+      "out larger than it was, which is why the Kodokyo case study published the billed 67.7% rather " +
+      "than our own 73.4%. Writes now travel in their own cacheWriteTokens field, priced at 1.25x " +
+      "centrally with the one-hour TTL carried in the upper bound - the response reports how many " +
+      "tokens were written, never for how long, so the ambiguity belongs in the band. Energy is " +
+      "deliberately unchanged: a write does a full prefill and costs the same electricity as fresh " +
+      "input, so callEnergy adds the field back onto the input side. Prospective only. Rows already " +
+      "stored have their writes summed into inputTokens and nothing downstream can separate them " +
+      "again, so no historical figure moves - and a sender that does not send the field is priced " +
+      "exactly as before.",
+    materialityEstimate: 0.19,
   },
 ];
 

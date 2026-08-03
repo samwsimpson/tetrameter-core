@@ -31,6 +31,7 @@ const ALLOWED_KEYS: ReadonlySet<string> = new Set<string>([
   "inputTokens",
   "outputTokens",
   "cachedTokens",
+  "cacheWriteTokens",
   "reasoningTokens",
   "region",
   "durationMs",

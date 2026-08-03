@@ -46,6 +46,29 @@ export interface PricingFactor {
 
 const VERSION = "2026.08.0";
 
+/**
+ * What a provider charges to *write* a prompt-cache entry, as a multiple of its
+ * ordinary input price.
+ *
+ * Anthropic publishes 1.25x on the default five-minute TTL and 2x on the
+ * one-hour one. OpenAI does not charge a write premium at all, so this
+ * overstates for OpenAI-cached traffic — deliberately, and in the direction that
+ * does not flatter us. When a second provider's premium is worth modelling
+ * separately this becomes a per-provider lookup; one number with its ceiling
+ * disclosed beats a table with one honest row.
+ *
+ * The TTL is not recoverable from a response: it reports how many tokens were
+ * written, never for how long. So `default` is the central estimate and
+ * `oneHour` is the ceiling, and the gap between them is carried in the band
+ * rather than resolved by picking one.
+ */
+export const CACHE_WRITE_PREMIUM = {
+  /** Anthropic's five-minute TTL, which is the default and the common case. */
+  default: 1.25,
+  /** Anthropic's one-hour TTL. Indistinguishable from the default in metadata. */
+  oneHour: 2.0,
+} as const;
+
 function priceRef(id: string, detail: string): FactorRef {
   return {
     id: `pricing.${id}`,

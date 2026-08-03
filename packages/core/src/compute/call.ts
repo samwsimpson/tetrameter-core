@@ -39,7 +39,11 @@ import {
   WATER_OFFSITE,
   EMBODIED_RATIO,
 } from "../factors/overhead.js";
-import { resolvePricing, isModelSpecificPricing } from "../factors/pricing.js";
+import {
+  resolvePricing,
+  isModelSpecificPricing,
+  CACHE_WRITE_PREMIUM,
+} from "../factors/pricing.js";
 
 /**
  * IT-side energy for one call, before datacentre overhead.
@@ -87,7 +91,18 @@ export function callEnergy(call: CallRecord, opts: ComputeOptions = {}): Quantit
    * conversation, 511 fresh tokens against 8,450 cached read as zero.
    */
   const cached = call.cachedTokens ?? 0;
-  const uncachedInput = call.inputTokens;
+  /*
+   * A cache write costs the same energy as fresh input, because it *is* a
+   * prefill — the premium a provider charges for it is a billing decision, not a
+   * physical one. So it joins the input side here and is separated only in
+   * `callCost`.
+   *
+   * Senders that do not send `cacheWriteTokens` still have their writes inside
+   * `inputTokens`, so this addition is zero for them and the energy figure is
+   * byte-identical to before. Splitting the field must not quietly reduce
+   * anyone's measured energy.
+   */
+  const uncachedInput = call.inputTokens + (call.cacheWriteTokens ?? 0);
   const output = call.outputTokens + (call.reasoningTokens ?? 0);
 
   // Per-1k-token energy, expressed as kWh so everything downstream is in one unit.
@@ -255,27 +270,45 @@ export function callCost(call: CallRecord, opts: ComputeOptions = {}): Quantity 
   // Disjoint, not nested — see the note in callEnergy. Subtracting one from the
   // other priced fresh input at zero on every cache-read turn.
   const cached = call.cachedTokens ?? 0;
+  const cacheWrite = call.cacheWriteTokens ?? 0;
   const uncachedInput = call.inputTokens;
   const output = call.outputTokens + (call.reasoningTokens ?? 0);
 
   /*
-   * Known understatement: cache *writes* are billed at 1.25x input (2x on the
-   * one-hour TTL), and the collector folds them into `inputTokens` at 1.0x.
+   * Cache writes are billed at a premium, and until 2026.08.7 we priced them as
+   * ordinary input.
    *
-   * That is a deliberate simplification with a real cost: a turn that writes an
-   * 8,700-token prefix is under-priced by roughly 19%. It matters more than it
-   * used to, because it biases a caching comparison in the flattering direction
-   * — the write turn looks cheaper than billed while the read turns are exact,
-   * so a measured saving comes out larger than it was.
+   * Anthropic charges 1.25x input on the default five-minute TTL and 2x on the
+   * one-hour one. Which of the two applied is not recoverable from metadata — the
+   * response says how many tokens were written, never for how long — so the
+   * central estimate takes the five-minute default and the upper bound carries
+   * the one-hour case. That is the honest shape: a band we can defend rather than
+   * a single number we would have to pick a side on.
    *
-   * Fixing it needs a `cacheWriteTokens` field carried end to end, since nothing
-   * downstream can separate a write from ordinary input once they are summed.
-   * Recorded rather than silently tolerated.
+   * `cacheWriteTokens` absent means the sender has not split them out and its
+   * writes are still inside `inputTokens` at 1.0x, exactly as before. Rows already
+   * stored that way cannot be corrected: once summed, nothing downstream can tell
+   * a write from ordinary input. The fix is prospective by nature.
    */
-  const value =
+  const writeCost = (m: number): number =>
+    (cacheWrite / 1_000_000) * pricing.inputPer1m * m;
+
+  const base =
     (uncachedInput / 1_000_000) * pricing.inputPer1m +
     (cached / 1_000_000) * (pricing.cachedInputPer1m ?? pricing.inputPer1m) +
     (output / 1_000_000) * pricing.outputPer1m;
+
+  const value = base + writeCost(CACHE_WRITE_PREMIUM.default);
+
+  /*
+   * The ceiling carries the one-hour TTL, which we cannot rule out.
+   *
+   * Without a cache write this is identical to `value`, so the band is exactly
+   * what it was before the field existed. With one, the upper bound stops being
+   * "list price, undiscounted" and becomes "list price on the more expensive of
+   * the two TTLs" — the genuine worst case rather than a tidier one.
+   */
+  const ceiling = base + writeCost(CACHE_WRITE_PREMIUM.oneHour);
 
   // A catalogue hit is a real published list price: the only unknown is what
   // discount this customer negotiated, so the band runs downward only. A class
@@ -285,7 +318,7 @@ export function callCost(call: CallRecord, opts: ComputeOptions = {}): Quantity 
   return quantity({
     value,
     low: specific ? value * 0.7 : value * 0.25,
-    high: specific ? value : value * 4,
+    high: specific ? ceiling : ceiling * 4,
     unit: "USD",
     tier: specific ? 2 : 1,
     sources: [pricing.ref],

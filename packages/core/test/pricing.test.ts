@@ -124,6 +124,36 @@ describe("cost computation", () => {
     expect(cost.high).toBeGreaterThan(cost.value);
   });
 
+  it("charges a cache write at a premium over ordinary input", () => {
+    // The correction 2026.08.7 exists for. A million tokens written into the
+    // cache is billed at 1.25x a million sent fresh, not at parity — and every
+    // adapter folded writes into inputTokens at 1.0x until this landed, so a
+    // write turn read ~19% cheaper than the invoice said.
+    const fresh = callCost(call({ inputTokens: 1_000_000 }));
+    const written = callCost(call({ inputTokens: 0, cacheWriteTokens: 1_000_000 }));
+    expect(written.value).toBeCloseTo(fresh.value * 1.25, 6);
+  });
+
+  it("carries the one-hour TTL in the ceiling, because metadata cannot tell us which applied", () => {
+    // A response says how many tokens were written, never for how long. 1.25x is
+    // the five-minute default and 2x the one-hour; the gap belongs in the band
+    // rather than being resolved by picking a side.
+    const written = callCost(call({ inputTokens: 0, cacheWriteTokens: 1_000_000 }));
+    const fresh = callCost(call({ inputTokens: 1_000_000 }));
+    expect(written.high).toBeCloseTo(fresh.value * 2.0, 6);
+    expect(written.high).toBeGreaterThan(written.value);
+  });
+
+  it("prices a sender that does not split writes out exactly as before", () => {
+    // Non-breaking by construction: absent means the writes are still inside
+    // inputTokens at 1.0x, which is every row stored before this change and
+    // every sender that has not upgraded.
+    const before = callCost(call({ inputTokens: 1_000_000 }));
+    const after = callCost(call({ inputTokens: 1_000_000, cacheWriteTokens: undefined }));
+    expect(after.value).toBe(before.value);
+    expect(after.high).toBe(before.high);
+  });
+
   it("attaches a citable pricing source", () => {
     const [source] = callCost(call()).sources;
     expect(source?.kind).toBe("pricing");
