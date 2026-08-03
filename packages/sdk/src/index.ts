@@ -43,7 +43,9 @@ export type { CallEvent, RecordedCall, TraceContext, Sink } from "./types.js";
 
 export {
   recordAiSdkResult,
+  recordEmbedding,
   instrumentGenerateText,
+  _resetEmbeddingWarning,
   type AiSdkResultLike,
   type AiSdkRecordOptions,
 } from "./adapters/ai-sdk.js";

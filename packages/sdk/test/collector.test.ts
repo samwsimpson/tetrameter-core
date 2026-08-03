@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   Collector,
   MemorySink,
@@ -9,6 +9,8 @@ import {
   normalizeModelId,
   sameModel,
   recordAiSdkResult,
+  recordEmbedding,
+  _resetEmbeddingWarning,
   instrumentGenerateText,
   recordAnthropicMessage,
   extractUsage,
@@ -177,6 +179,37 @@ describe("adapters", () => {
     await collector.flush();
     expect(sink.calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 50 });
     expect(sink.calls[1]).toMatchObject({ inputTokens: 7, outputTokens: 3 });
+  });
+
+  it("reads embedding usage, which reports under a third field name again", async () => {
+    // `embed`/`embedMany` return `usage: { tokens }`. Before 0.2.1 the adapter
+    // read inputTokens/promptTokens only, so this recorded 0/0 with no error —
+    // indistinguishable from a call that genuinely cost nothing. Both entry
+    // points are pinned: the explicit one, and the general one an existing
+    // caller would already be using.
+    recordEmbedding({ usage: { tokens: 8_192 } }, { model: "openai/text-embedding-3-small" });
+    recordAiSdkResult({ usage: { tokens: 512 } }, { model: "openai/text-embedding-3-small" });
+    await collector.flush();
+    expect(sink.calls[0]).toMatchObject({ inputTokens: 8_192, outputTokens: 0 });
+    expect(sink.calls[1]).toMatchObject({ inputTokens: 512, outputTokens: 0 });
+  });
+
+  it("does not mark an unreadable embedding as failed", async () => {
+    // Zero is all we can honestly say, but `error` would be a lie with a
+    // consequence: a trace whose every call is flagged failed produces no
+    // outcome, so a measurement gap would erase a unit of work that happened.
+    _resetEmbeddingWarning();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recordEmbedding({}, { model: "openai/text-embedding-3-small" });
+    recordEmbedding({}, { model: "openai/text-embedding-3-small" });
+    await collector.flush();
+
+    expect(sink.calls[0]).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    expect(sink.calls[0]?.error).toBeUndefined();
+    // Warned, but once — a bulk index would otherwise print a line per chunk,
+    // and noisy instrumentation gets deleted.
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it("takes the billed cost from the AI Gateway, which the engine treats as exact", async () => {

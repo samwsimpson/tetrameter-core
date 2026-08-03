@@ -9,6 +9,25 @@
  * — and SiteBeacon's own code already carries both fallbacks. We do the same
  * rather than pin a version, because an instrumentation library that breaks on a
  * minor upgrade gets removed.
+ *
+ * ── Embeddings report usage under a third name again ────────────────────────
+ *
+ * `embed` and `embedMany` return `usage: { tokens }` — not `inputTokens`, not
+ * `promptTokens`. Until 0.2.1 this adapter read neither, so every embedding it
+ * recorded landed as 0 input and 0 output with no `error` set: identical, on the
+ * wire and in the dashboard, to a call that genuinely cost nothing. An
+ * embedding-heavy integration would have reported a footprint near zero and
+ * looked healthy doing it.
+ *
+ * That is the failure mode this library exists to avoid, and it survived because
+ * the adapter was written against one call shape and the type it reads through
+ * was written from the same example. Found by the Kodori integration on
+ * 2026-08-03, against `ai@4.3.19`.
+ *
+ * Prefer `recordEmbedding` at an embedding call site: it says what the call was,
+ * and it is the only place that knows 0 output tokens is correct rather than
+ * missing. `recordAiSdkResult` now also reads `tokens`, so an existing caller
+ * passing an embedding result gets a right answer instead of a silent zero.
  */
 
 import { record } from "../record.js";
@@ -25,6 +44,13 @@ export interface AiSdkResultLike {
     readonly cachedInputTokens?: number;
     readonly reasoningTokens?: number;
     readonly totalTokens?: number;
+    /**
+     * Embeddings only. `EmbeddingModelUsage` is `{ tokens }` and nothing else —
+     * there is no completion, so an embedding has no output side. Distinct from
+     * `totalTokens`, which is a chat result's input-plus-output sum; the two
+     * never appear together, so reading one cannot shadow the other.
+     */
+    readonly tokens?: number;
   };
   readonly providerMetadata?: Record<string, unknown>;
 }
@@ -83,12 +109,66 @@ export function recordAiSdkResult(result: AiSdkResultLike, opts: AiSdkRecordOpti
   const billed = opts.billedCostUsd ?? gatewayCostUsd(result);
   record({
     ...opts,
-    inputTokens: u?.inputTokens ?? u?.promptTokens ?? 0,
+    // `tokens` last: it is the embedding shape, and a chat result never carries
+    // it, so the fallback can only fire where the first two are genuinely absent.
+    inputTokens: u?.inputTokens ?? u?.promptTokens ?? u?.tokens ?? 0,
     outputTokens: u?.outputTokens ?? u?.completionTokens ?? 0,
     ...(u?.cachedInputTokens !== undefined ? { cachedTokens: u.cachedInputTokens } : {}),
     ...(u?.reasoningTokens !== undefined ? { reasoningTokens: u.reasoningTokens } : {}),
     ...(billed !== undefined ? { billedCostUsd: billed } : {}),
   });
+}
+
+/**
+ * Warned at most once per process.
+ *
+ * An embedding whose usage cannot be read is worth saying out loud, but saying
+ * it per call would print thousands of lines during a bulk index and get the
+ * instrumentation removed — which is the outcome every design decision in this
+ * library is trying to avoid.
+ */
+let warnedMissingEmbeddingUsage = false;
+
+/**
+ * Record an `embed` / `embedMany` call.
+ *
+ * Separate from `recordAiSdkResult` because only an embedding call site knows
+ * that zero output tokens is the right answer rather than a missing one. There
+ * is no completion to bill, so `outputTokens: 0` here is a fact, whereas the same
+ * zero arriving from a chat result means the adapter failed to read something.
+ *
+ * When usage is unreadable the call is still recorded, at zero, and a warning is
+ * printed once. Dropping it would lose the call entirely; recording it keeps the
+ * trace shape intact and degrades one figure, which is the trade this library
+ * makes everywhere else. It is deliberately *not* marked `error` — the call
+ * succeeded, and a trace whose every call is flagged failed is counted as
+ * producing no outcome at all, which would turn a measurement gap into a missing
+ * unit of work.
+ */
+export function recordEmbedding(result: AiSdkResultLike, opts: AiSdkRecordOptions): void {
+  const u = result.usage;
+  const tokens = u?.tokens ?? u?.inputTokens ?? u?.promptTokens;
+
+  if (tokens === undefined && !warnedMissingEmbeddingUsage) {
+    warnedMissingEmbeddingUsage = true;
+    console.warn(
+      "[tetrameter] an embedding result carried no readable usage; recording 0 tokens. " +
+        "Check the provider returns `usage.tokens` — a silent zero here understates the footprint.",
+    );
+  }
+
+  const billed = opts.billedCostUsd ?? gatewayCostUsd(result);
+  record({
+    ...opts,
+    inputTokens: tokens ?? 0,
+    outputTokens: 0,
+    ...(billed !== undefined ? { billedCostUsd: billed } : {}),
+  });
+}
+
+/** Test seam: the once-per-process warning would otherwise leak between cases. */
+export function _resetEmbeddingWarning(): void {
+  warnedMissingEmbeddingUsage = false;
 }
 
 /**
