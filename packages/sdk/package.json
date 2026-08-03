@@ -1,6 +1,6 @@
 {
   "name": "@kumokodo/tetrameter-sdk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Metadata-only collector for Tetrameter. Records LLM call metadata — never prompt content — and groups multi-call agent runs into traces.",
   "license": "Apache-2.0",
   "type": "module",

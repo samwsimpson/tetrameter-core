@@ -274,6 +274,42 @@ describe("adapters", () => {
     });
   });
 
+  it("reads Anthropic's cache counters from providerMetadata, where the AI SDK puts them", async () => {
+    // 0.2.2 added cacheCreationInputTokens to the usage shape and it was dead
+    // code: through the AI SDK, Anthropic reports both counters under
+    // providerMetadata.anthropic and never on usage. Nothing populated
+    // cacheWriteTokens for an AI SDK caller, so the premium this field exists to
+    // charge was still not being charged. Found by the Kodori integration, which
+    // had already worked around it by reading the metadata itself.
+    recordAiSdkResult(
+      {
+        usage: { inputTokens: 300, outputTokens: 40 },
+        providerMetadata: {
+          anthropic: { cacheCreationInputTokens: 8_700, cacheReadInputTokens: 1_200 },
+        },
+      },
+      { model: "claude-haiku-4-5" },
+    );
+    await collector.flush();
+    expect(sink.calls[0]).toMatchObject({
+      inputTokens: 300,
+      cacheWriteTokens: 8_700,
+      cachedTokens: 1_200,
+    });
+  });
+
+  it("prefers usage over providerMetadata where a version supplies both", async () => {
+    recordAiSdkResult(
+      {
+        usage: { inputTokens: 300, outputTokens: 40, cachedInputTokens: 99 },
+        providerMetadata: { anthropic: { cacheReadInputTokens: 1_200 } },
+      },
+      { model: "claude-haiku-4-5" },
+    );
+    await collector.flush();
+    expect(sink.calls[0]?.cachedTokens).toBe(99);
+  });
+
   it("omits cacheWriteTokens entirely when the provider reports no write", async () => {
     // Absent must stay absent rather than becoming 0: the engine treats a missing
     // field as "this sender does not split writes out" and prices exactly as it

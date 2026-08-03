@@ -58,6 +58,38 @@ export interface AiSdkResultLike {
 }
 
 /**
+ * Anthropic's cache counters, which the AI SDK does not put in `usage`.
+ *
+ * 0.2.2 added `cacheCreationInputTokens` to the usage shape and it was dead code:
+ * for Anthropic through the AI SDK the counters live under
+ * `providerMetadata.anthropic`, not on `usage`, so nothing ever populated
+ * `cacheWriteTokens` for an AI SDK caller. Reported by the Kodori integration,
+ * which had already worked around it by reading the metadata itself — a
+ * workaround nobody should have needed.
+ *
+ * `usage` is still preferred where a version does surface it, so this is a
+ * fallback rather than a replacement and both spellings keep working.
+ */
+function anthropicCacheCounters(result: AiSdkResultLike): {
+  write?: number;
+  read?: number;
+} {
+  const meta = result.providerMetadata?.["anthropic"];
+  if (typeof meta !== "object" || meta === null) return {};
+  const m = meta as Record<string, unknown>;
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+  return {
+    ...(num(m["cacheCreationInputTokens"]) !== undefined
+      ? { write: num(m["cacheCreationInputTokens"])! }
+      : {}),
+    ...(num(m["cacheReadInputTokens"]) !== undefined
+      ? { read: num(m["cacheReadInputTokens"])! }
+      : {}),
+  };
+}
+
+/**
  * The billed cost of the call, when the AI Gateway reported one.
  *
  * ── Why this is worth reaching for ──────────────────────────────────────────
@@ -106,6 +138,12 @@ export interface AiSdkRecordOptions extends Partial<Omit<CallEvent, "model">> {
  */
 export function recordAiSdkResult(result: AiSdkResultLike, opts: AiSdkRecordOptions): void {
   const u = result.usage;
+  // Anthropic reports its cache counters in providerMetadata, not usage. Read as
+  // a fallback so a caller does not have to know which of the two a given
+  // provider-and-version combination uses.
+  const anth = anthropicCacheCounters(result);
+  const cacheRead = u?.cachedInputTokens ?? anth.read;
+  const cacheWrite = u?.cacheCreationInputTokens ?? anth.write;
   // An explicit cost at the call site wins: the caller may know the real invoiced
   // figure where the Gateway only knows its own.
   const billed = opts.billedCostUsd ?? gatewayCostUsd(result);
@@ -115,10 +153,8 @@ export function recordAiSdkResult(result: AiSdkResultLike, opts: AiSdkRecordOpti
     // it, so the fallback can only fire where the first two are genuinely absent.
     inputTokens: u?.inputTokens ?? u?.promptTokens ?? u?.tokens ?? 0,
     outputTokens: u?.outputTokens ?? u?.completionTokens ?? 0,
-    ...(u?.cachedInputTokens !== undefined ? { cachedTokens: u.cachedInputTokens } : {}),
-    ...(u?.cacheCreationInputTokens !== undefined
-      ? { cacheWriteTokens: u.cacheCreationInputTokens }
-      : {}),
+    ...(cacheRead !== undefined ? { cachedTokens: cacheRead } : {}),
+    ...(cacheWrite !== undefined ? { cacheWriteTokens: cacheWrite } : {}),
     ...(u?.reasoningTokens !== undefined ? { reasoningTokens: u.reasoningTokens } : {}),
     ...(billed !== undefined ? { billedCostUsd: billed } : {}),
   });
