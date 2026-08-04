@@ -26,6 +26,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # The Python collector runs in the same CI as the TypeScript one, because a
+      # sibling package that is only tested when somebody remembers is a sibling
+      # package that drifts. No dependencies to install: it is stdlib only.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python collector
+        working-directory: packages/sdk-python
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest tests -q
+
       # The library's whole value is that its numbers are reproducible. A demo
       # that throws is a broken methodology, not a broken example.
       - name: Smoke demo
