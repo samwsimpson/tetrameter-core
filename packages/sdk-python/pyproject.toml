@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tetrameter"
+version = "0.1.0"
+description = "Metadata-only collector for measuring the energy, carbon, water and land of AI inference."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "KumoKodo" }]
+keywords = ["llm", "observability", "carbon", "sustainability", "sci", "telemetry"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Monitoring",
+]
+# No runtime dependencies, on purpose. A telemetry library that drags in a
+# dependency tree is one a security review rejects, and urllib is enough to POST
+# JSON.
+dependencies = []
+
+[project.urls]
+Homepage = "https://tetrameter.ai"
+Source = "https://github.com/samwsimpson/tetrameter-core"
+Methodology = "https://tetrameter.ai/methodology"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tetrameter"]
