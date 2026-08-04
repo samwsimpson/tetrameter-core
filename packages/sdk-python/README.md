@@ -79,3 +79,34 @@ package pins them from the start:
 
 Apache-2.0. The methodology is meant to be checked, so the code that produces the
 numbers is readable.
+
+## Releasing
+
+Tagged, like the npm packages, and published by GitHub Actions through PyPI
+Trusted Publishing — no API token exists anywhere.
+
+```bash
+git tag python-v0.1.0 && git push --tags
+```
+
+The workflow refuses to publish a tag whose version does not match
+`pyproject.toml`, and verifies the built wheel actually contains the package and
+its licence before uploading. Both checks are cheap, and a version on PyPI cannot
+be replaced or yanked into non-existence afterwards — unlike npm there is not even
+a 72-hour window.
+
+One-time setup on PyPI, under the project's *Publishing* settings. Because
+`tetrameter` has never been uploaded, this is added as a **pending publisher**,
+which is how a project is bootstrapped without a token:
+
+| Field | Value |
+|---|---|
+| PyPI project name | `tetrameter` |
+| Owner | `samwsimpson` |
+| Repository name | `tetrameter-core` |
+| Workflow name | `publish-python.yml` |
+| Environment name | `pypi-publish` |
+
+Then create a GitHub environment called `pypi-publish` and restrict its
+deployment branches and tags to `python-v*`, so the workflow can only run from a
+release tag.

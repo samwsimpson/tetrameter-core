@@ -1,0 +1,94 @@
+# Publish `tetrameter` to PyPI via Trusted Publishing (OIDC). No API token anywhere.
+#
+# Separate from publish.yml because the two ecosystems fail differently and
+# sharing a workflow would mean one set of guards for two sets of traps. The npm
+# one encodes four; these are the ones that bite here:
+#
+#   1. `id-token: write` is required, and its absence fails at the LAST step with
+#      an authentication error that reads like a misconfigured publisher. The
+#      permission is declared explicitly rather than inherited.
+#   2. A pending publisher must exist on PyPI BEFORE the first run. `tetrameter`
+#      does not exist there yet, so the trusted-publisher config is created
+#      against a project name that has never been uploaded — PyPI calls this a
+#      "pending publisher" and it is the only way to bootstrap without a token.
+#   3. `attestations` need a public repo. This one is public, so they are on;
+#      they are the same argument as npm provenance — cryptographic proof the
+#      artifact came from the source people can read, which is the entire claim
+#      this library makes.
+#   4. A version already on PyPI cannot be replaced, ever, and unlike npm there
+#      is no 72-hour window. `twine check` and a build run in CI on every push,
+#      so a broken artifact fails before a tag is created rather than after it is
+#      permanent.
+
+name: Publish Python
+
+on:
+  push:
+    tags:
+      - "python-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi-publish
+    permissions:
+      # Mints the OIDC token PyPI validates against the trusted-publisher config.
+      id-token: write
+      # Lets the action attach build attestations to the release artifacts.
+      attestations: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Assert the tag matches the packaged version
+        working-directory: packages/sdk-python
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#python-v}"
+          PKG=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag=$TAG package=$PKG"
+          # A mismatch here publishes a version nobody tagged, permanently. Cheap
+          # to check, impossible to undo.
+          test "$TAG" = "$PKG"
+
+      - name: Build
+        working-directory: packages/sdk-python
+        run: |
+          python -m pip install --quiet build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify the artifact before it becomes permanent
+        working-directory: packages/sdk-python
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import zipfile, glob, sys
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          # The package importable, and the licence present. A wheel missing
+          # either is one that has to be superseded rather than fixed.
+          need = ["tetrameter/__init__.py", "tetrameter/collector.py"]
+          missing = [n for n in need if n not in names]
+          if missing:
+              sys.exit(f"wheel is missing {missing}")
+          if not any("LICENSE" in n.upper() for n in names):
+              sys.exit("wheel carries no licence file")
+          print("wheel contents verified:", wheel)
+          PY
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/sdk-python/dist
+          # Public repo, so the transparency log leaks nothing that is not
+          # already readable.
+          attestations: true
