@@ -415,3 +415,82 @@ class TestSequenceUnderConcurrency:
 
         seqs = sorted(c["seq"] for c in s.calls)
         assert seqs == list(range(200))
+
+
+class TestReportedZeroIsNotAbsence:
+    """A provider reporting 0 said something. A provider saying nothing did not.
+
+    `record_openai_completion` used truthiness until 0.1.2, so an explicit
+    `cached_tokens: 0` was discarded and became indistinguishable from a
+    provider that never reports the field. The Anthropic adapter always had it
+    right, so this was two rules in one file with the wrong one on the adapter
+    serving every OpenAI-compatible provider.
+
+    Reported by the AI Colosseum integration, which declined to adopt the
+    adapter over it. Their argument is the one that makes it a defect rather
+    than a nit: the calls explicitly reporting 0 are the DENOMINATOR of any
+    cache hit-rate figure. Drop them and hit rate is computed only over calls
+    that had a hit, and reads 100%.
+    """
+
+    def _usage(self, **kw):
+        obj = type("U", (), {})()
+        for k, v in kw.items():
+            setattr(obj, k, v)
+        return obj
+
+    def _response(self, usage):
+        r = type("R", (), {})()
+        r.usage = usage
+        r.model = "gpt-5.4-mini"
+        return r
+
+    def test_a_reported_zero_cache_read_is_recorded(self, sink):
+        usage = self._usage(
+            prompt_tokens=100,
+            completion_tokens=20,
+            prompt_tokens_details=self._usage(cached_tokens=0),
+        )
+        tetrameter.record_openai_completion(self._response(usage))
+        tetrameter.flush()
+        assert sink.calls[0]["cachedTokens"] == 0
+
+    def test_an_unreported_cache_read_stays_absent(self, sink):
+        usage = self._usage(prompt_tokens=100, completion_tokens=20)
+        tetrameter.record_openai_completion(self._response(usage))
+        tetrameter.flush()
+        assert "cachedTokens" not in sink.calls[0]
+
+    def test_a_reported_zero_reasoning_count_is_recorded(self, sink):
+        usage = self._usage(
+            prompt_tokens=100,
+            completion_tokens=20,
+            completion_tokens_details=self._usage(reasoning_tokens=0),
+        )
+        tetrameter.record_openai_completion(self._response(usage))
+        tetrameter.flush()
+        assert sink.calls[0]["reasoningTokens"] == 0
+
+    def test_the_anthropic_adapter_agrees(self, sink):
+        """Both adapters, one rule. They disagreed for two releases."""
+        usage = self._usage(
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        tetrameter.record_anthropic_message(self._response(usage))
+        tetrameter.flush()
+        assert sink.calls[0]["cachedTokens"] == 0
+        assert sink.calls[0]["cacheWriteTokens"] == 0
+
+
+class TestOutOfTraceSeq:
+    def test_a_call_outside_a_trace_carries_position_zero(self, sink):
+        """It is the only call in its own trace, so 0 is a fact not a fallback.
+
+        The docstring said this; the code did not do it.
+        """
+        tetrameter.record(model="m", inputTokens=1, outputTokens=1)
+        tetrameter.flush()
+        assert sink.calls[0]["seq"] == 0

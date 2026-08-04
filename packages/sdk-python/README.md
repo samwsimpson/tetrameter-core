@@ -75,6 +75,17 @@ flattering.
 
 Each reads usage counters and nothing else.
 
+A counter reported as **0** is recorded as 0; a counter the provider never
+mentions stays absent. Those are different facts and conflating them hides
+under-measurement -- the calls explicitly reporting zero cache reads are the
+denominator of any hit-rate figure, so discarding them makes hit rate read 100%.
+
+Any usage counter an adapter does *not* read is logged once per provider per
+process, at INFO, names only. "This provider does not report X" and "we are
+reading the wrong key for X" are otherwise the same observation, and a library
+that silently reads a fixed list of names can be wrong forever and look complete
+doing it.
+
 Two are worth explaining, because the TypeScript SDK shipped both bugs and this
 package pins them from the start:
 

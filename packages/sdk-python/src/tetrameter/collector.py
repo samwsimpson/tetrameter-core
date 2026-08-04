@@ -144,6 +144,14 @@ class Collector:
             # A call outside any trace is not dropped -- it gets a trace of its
             # own. Partial instrumentation should degrade a number, never lose it.
             clean.setdefault("traceId", new_trace_id())
+            # And it is the ONLY call in that trace, so position 0 is a fact.
+            #
+            # This branch previously set no seq at all, which contradicted
+            # next_seq()'s own docstring -- the code and its documentation
+            # disagreed about a field that feeds `_derive_id`. Caught by the AI
+            # Colosseum integration, whose test had to be relaxed to
+            # `rec.get("seq", 0) == 0` to accommodate the gap.
+            clean.setdefault("seq", 0)
 
         clean.setdefault("timestamp", _now_iso())
         if self._region is not None:
