@@ -494,3 +494,62 @@ class TestOutOfTraceSeq:
         tetrameter.record(model="m", inputTokens=1, outputTokens=1)
         tetrameter.flush()
         assert sink.calls[0]["seq"] == 0
+
+
+class TestAbsentUsageIsNotSilent:
+    """A response with no usage counters records 0/0 — and now says so.
+
+    The embeddings bug wearing a different hat, in the file whose docstring
+    claims to have pre-empted it. `record_embedding` warned from the start; the
+    completion adapters did not.
+
+    Surfaced by testing an AI Colosseum claim instead of accepting it. They had
+    concluded correctly that failures should not go through the completion
+    adapter, but on the premise that `error` cannot ride through it — it can, as
+    an attribution kwarg. The real reason is the two invented zeros.
+    """
+
+    def _resp(self, **kw):
+        r = type("R", (), {})()
+        for k, v in kw.items():
+            setattr(r, k, v)
+        return r
+
+    def test_an_error_kwarg_does_ride_through_the_adapter(self, sink):
+        usage = self._resp(prompt_tokens=10, completion_tokens=2)
+        tetrameter.record_openai_completion(
+            self._resp(usage=usage, model="m"), error="rate_limited"
+        )
+        tetrameter.flush()
+        assert sink.calls[0]["error"] == "rate_limited"
+
+    def test_a_usage_carrier_satisfies_the_contract(self, sink):
+        """So a caller can keep completion text out of this module entirely."""
+        usage = self._resp(prompt_tokens=10, completion_tokens=2)
+        tetrameter.record_openai_completion(
+            self._resp(usage=usage), model="m2", provider="cohere"
+        )
+        tetrameter.flush()
+        assert sink.calls[0]["model"] == "m2"
+        assert sink.calls[0]["provider"] == "cohere"
+        assert sink.calls[0]["inputTokens"] == 10
+
+    def test_absent_usage_warns_rather_than_recording_a_silent_zero(self, sink, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="tetrameter"):
+            tetrameter.record_openai_completion(self._resp(model="m"), error="abandoned")
+        tetrameter.flush()
+        assert sink.calls[0]["inputTokens"] == 0
+        assert "no usage counters" in caplog.text
+        assert "record_failure" in caplog.text
+
+    def test_it_does_not_mark_the_call_failed_on_our_behalf(self, sink):
+        """Our reading failed, not necessarily the call.
+
+        Marking it failed would tell the engine no work was delivered, turning a
+        measurement gap into a missing unit of work.
+        """
+        tetrameter.record_openai_completion(self._resp(model="m"))
+        tetrameter.flush()
+        assert "error" not in sink.calls[0]

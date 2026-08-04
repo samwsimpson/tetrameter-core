@@ -60,6 +60,9 @@ def record_anthropic_message(response: Any, **attribution: Any) -> None:
     if cache_write is not None:
         fields["cacheWriteTokens"] = cache_write
 
+    if usage is None:
+        _warn_missing_usage("message", fields["provider"])
+    _log_unknown_usage_fields(usage, fields["provider"], _ANTHROPIC_KNOWN_USAGE)
     record(**fields, **attribution)
 
 
@@ -133,6 +136,39 @@ def _log_unknown_usage_fields(usage: Any, provider: str, known: frozenset[str]) 
         return
 
 
+def _warn_missing_usage(kind: str, provider: str) -> None:
+    """A response with no usage counters at all, recorded as 0/0.
+
+    This is the embeddings bug wearing a different hat, in the file whose own
+    docstring claims to have pre-empted it. `record_embedding` said so out loud
+    from the start; the completion adapters recorded a silent 0/0 and looked
+    identical to a call that genuinely cost nothing.
+
+    Found on 2026-08-04 while testing an AI Colosseum claim rather than
+    accepting it. They had concluded -- correctly -- that failures and abandoned
+    streams should not go through the completion adapter, but on the premise
+    that `error` cannot ride through it. It can: attribution kwargs pass
+    straight to `record`. The real reason is this: with no usage object the
+    adapter invents two zeros.
+
+    Not an `error`, deliberately. The call may have genuinely happened; what
+    failed is our reading of it, and marking the call failed would tell the
+    engine no work was delivered -- turning a measurement gap into a missing
+    unit of work.
+    """
+    key = ("__missing_usage__", provider)
+    if key in _seen_unknown:
+        return
+    _seen_unknown.add(key)
+    log.warning(
+        "tetrameter: a %s response from %s carried no usage counters; recording 0/0. "
+        "A silent zero here is indistinguishable from a call that cost nothing. "
+        "For a failure or an abandoned stream use record_failure(), which says so.",
+        kind,
+        provider,
+    )
+
+
 def _warn_unknown(provider: str, field: str) -> None:
     if (provider, field) in _seen_unknown:
         return
@@ -147,6 +183,24 @@ def _warn_unknown(provider: str, field: str) -> None:
 
 def record_openai_completion(response: Any, **attribution: Any) -> None:
     """Record an OpenAI chat completion.
+
+    ── You may hand it a usage carrier instead of the response ─────────────────
+
+    The contract is only that the argument has a readable ``.usage``, so this is
+    supported and is the better call:
+
+        carrier = SimpleNamespace(usage=response.usage)
+        record_openai_completion(carrier, model=..., provider=...)
+
+    The AI Colosseum integration arrived at it and the reasoning is worth
+    stating: ``sanitize`` would strip completion text anyway, but passing a
+    carrier means **an object that has held completion text never enters this
+    module at all**. A guarantee about what cannot happen beats a guarantee
+    about what gets cleaned up, and this library's whole claim is the former.
+
+    Attribution kwargs pass through untouched, including ``error`` and
+    ``cacheWriteTokens`` — anything in ``ALLOWED_FIELDS`` the provider does not
+    report but the call site knows.
 
     ``reasoning_tokens`` sits inside ``completion_tokens_details`` and is already
     counted in ``completion_tokens``, so it is reported separately rather than
@@ -189,6 +243,8 @@ def record_openai_completion(response: Any, **attribution: Any) -> None:
     if cached is not None:
         fields["cachedTokens"] = cached
 
+    if usage is None:
+        _warn_missing_usage("completion", fields["provider"])
     _log_unknown_usage_fields(usage, fields["provider"], _OPENAI_KNOWN_USAGE)
     record(**fields, **attribution)
 

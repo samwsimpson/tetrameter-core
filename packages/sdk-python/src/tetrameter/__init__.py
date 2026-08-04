@@ -28,7 +28,7 @@ from .adapters import (
     record_openai_completion,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     "ALLOWED_FIELDS",
