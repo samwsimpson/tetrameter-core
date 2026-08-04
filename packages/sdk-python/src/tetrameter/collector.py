@@ -6,6 +6,7 @@ import atexit
 import hashlib
 import logging
 import os
+import queue
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -51,13 +52,56 @@ class Collector:
     out across a pool would arrive in pieces.
     """
 
-    def __init__(self, sink: Sink, *, batch_size: int = 100, region: str | None = None) -> None:
+    def __init__(
+        self,
+        sink: Sink,
+        *,
+        batch_size: int = 100,
+        region: str | None = None,
+        queue_size: int = 32,
+    ) -> None:
         self._sink = sink
         self._batch_size = batch_size
         self._region = region
         self._buffer: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._warned_dropped: set[str] = set()
+        # Bounded on purpose. An unbounded queue in front of a sink that has
+        # stopped responding is a memory leak that ends as an OOM in somebody
+        # else's application -- the same reasoning that rules out a retry queue.
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_size)
+        self._worker = threading.Thread(
+            target=self._run, name="tetrameter-sink", daemon=True
+        )
+        self._worker.start()
+
+    def _run(self) -> None:
+        """Owns every byte of I/O this library performs."""
+        while True:
+            batch, done = self._queue.get()
+            try:
+                if batch:
+                    self._sink.send(batch)
+            except Exception as err:  # noqa: BLE001 - a sink must not take the app down
+                log.warning(
+                    "tetrameter: send failed, dropping %d records: %s", len(batch), err
+                )
+            finally:
+                if done is not None:
+                    done.set()
+                self._queue.task_done()
+
+    def _dispatch(self, batch: list[dict[str, Any]], done: Any = None) -> None:
+        try:
+            self._queue.put_nowait((batch, done))
+        except queue.Full:
+            # Dropped rather than blocked. Blocking here would reintroduce the
+            # stall this queue exists to remove, just further along.
+            log.warning(
+                "tetrameter: sink is not keeping up, dropping %d records", len(batch)
+            )
+            if done is not None:
+                done.set()
 
     def record(self, **event: Any) -> None:
         """Record one call. Never raises.
@@ -110,18 +154,43 @@ class Collector:
             self._buffer.append(clean)
             ready = len(self._buffer) >= self._batch_size
         if ready:
-            self.flush()
+            # Handed to the background thread rather than sent here.
+            #
+            # This used to call flush() inline, which meant every batch_size-th
+            # record paid for a synchronous HTTP round trip on whatever thread
+            # happened to make that call -- in an asyncio application, the event
+            # loop, stalled for up to the sink's timeout. Reported by the AI
+            # Colosseum integration, which worked around it before we fixed it.
+            #
+            # An instrumentation library that periodically freezes the
+            # application it observes gets removed, not tuned.
+            with self._lock:
+                batch, self._buffer = self._buffer, []
+            self._dispatch(batch)
 
-    def flush(self) -> None:
-        """Send whatever is buffered. Never raises."""
+    def flush(self, timeout: float = 15.0) -> None:
+        """Send whatever is buffered, and wait for it. Never raises.
+
+        Deliberately still blocking, unlike the automatic dispatch above. This is
+        what a caller reaches for at a trace boundary or before returning from a
+        short-lived worker, and on a serverless platform the process can be
+        frozen the instant the handler returns -- so a flush that only queued
+        would lose exactly the records somebody explicitly asked to send.
+
+        From async code, call it off the loop:
+
+            await asyncio.to_thread(tetrameter.flush)
+
+        The wait is bounded because a hung sink must not become a hung
+        application. Ordering does the rest: the queue is FIFO, so when this
+        batch's signal fires everything queued before it has already gone.
+        """
         with self._lock:
             batch, self._buffer = self._buffer, []
-        if not batch:
-            return
-        try:
-            self._sink.send(batch)
-        except Exception as err:  # noqa: BLE001
-            log.warning("tetrameter: flush failed, dropping %d records: %s", len(batch), err)
+        done = threading.Event()
+        self._dispatch(batch, done)
+        if not done.wait(timeout):
+            log.warning("tetrameter: flush timed out after %.1fs; records may be unsent", timeout)
 
 
 _collector: Collector | None = None

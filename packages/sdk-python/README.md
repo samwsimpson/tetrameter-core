@@ -34,6 +34,18 @@ the application it observes gets removed rather than fixed.
 stays inert. A developer machine records nothing instead of writing
 production-shaped rows into a production organisation.
 
+**Block your request path.** All I/O happens on a background thread. A full
+batch is handed over and `record()` returns immediately -- it used to send
+inline, which stalled an asyncio event loop for the length of an HTTP round trip
+every hundredth call. `flush()` is still synchronous, deliberately: it is what
+you call at a trace boundary, and on a serverless platform the process can be
+frozen the moment your handler returns, so a flush that only queued would lose
+exactly the records you asked to send. From async code, call it off the loop:
+
+```python
+await asyncio.to_thread(tetrameter.flush)
+```
+
 **Retry a failed batch.** A retry queue inside a telemetry client is a memory leak
 waiting for an outage. Ingest is idempotent on `(org, id)` so a retry made
 elsewhere — a proxy, a load balancer — is harmless instead.

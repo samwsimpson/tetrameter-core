@@ -10,6 +10,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import asyncio
+import contextvars
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -272,16 +277,141 @@ class TestAdapters:
 
 
 class TestBatching:
-    def test_flushes_when_the_batch_fills(self):
+    def test_dispatches_when_the_batch_fills_without_blocking_the_caller(self):
+        """A full batch goes on its own, and does NOT go on the caller's thread.
+
+        This assertion changed when the sink moved to a background worker. It
+        used to require the batch to be in the sink the instant the fifth record
+        returned, which is only true if `record()` performed the HTTP round trip
+        inline -- the stall the AI Colosseum integration hit on its event loop
+        every hundredth model call. Delivery is now asynchronous, so the test
+        waits for it instead of demanding it have already happened.
+        """
         collector_module._reset_for_tests()
         s = tetrameter.MemorySink()
         tetrameter.configure(sink=s, batch_size=5)
         for _ in range(5):
             tetrameter.record(model="m", inputTokens=1, outputTokens=1)
-        assert len(s.calls) == 5  # sent without an explicit flush
+
+        deadline = time.monotonic() + 5.0
+        while len(s.calls) < 5 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(s.calls) == 5
+
+    def test_an_explicit_flush_has_sent_by_the_time_it_returns(self):
+        """The boundary guarantee, which stayed synchronous on purpose.
+
+        A serverless process can be frozen the instant its handler returns, so a
+        flush that merely queued would lose exactly the records somebody asked
+        to send.
+        """
+        collector_module._reset_for_tests()
+        s = tetrameter.MemorySink()
+        tetrameter.configure(sink=s, batch_size=1000)
+        for _ in range(3):
+            tetrameter.record(model="m", inputTokens=1, outputTokens=1)
+        tetrameter.flush()
+        assert len(s.calls) == 3  # no waiting, no polling
+
+    def test_a_slow_sink_does_not_stall_the_recording_thread(self):
+        """The regression that started this. Recording must not pay for I/O."""
+        collector_module._reset_for_tests()
+
+        class SlowSink:
+            def __init__(self) -> None:
+                self.sent = 0
+
+            def send(self, calls):
+                time.sleep(1.0)
+                self.sent += len(calls)
+
+        tetrameter.configure(sink=SlowSink(), batch_size=5)
+        started = time.perf_counter()
+        for _ in range(10):  # crosses the batch boundary twice
+            tetrameter.record(model="m", inputTokens=1, outputTokens=1)
+        elapsed = time.perf_counter() - started
+        assert elapsed < 0.5, f"recording blocked for {elapsed:.2f}s on a slow sink"
 
     def test_flushing_twice_does_not_resend(self, sink):
         tetrameter.record(model="m", inputTokens=1, outputTokens=1)
         tetrameter.flush()
         tetrameter.flush()
         assert len(sink.calls) == 1
+
+
+class TestSequenceUnderConcurrency:
+    """The bug the AI Colosseum integration found, and why it mattered twice.
+
+    `_seq` was a `ContextVar[int]`. `asyncio.gather` runs each awaitable in a
+    Task, and a Task gets a COPY of the context -- so every branch of a fan-out
+    read 0, incremented its own private copy, and emitted `seq=0`.
+
+    Ordering was the visible symptom. The one that mattered more is that `seq`
+    is part of `_derive_id` and is the field distinguishing two otherwise
+    identical calls in one trace: pinned at 0, a fan-out issuing the same prompt
+    to the same model twice derives ONE id for both, and ingest's
+    `on conflict do nothing` keeps one of them. Silent loss, in a library whose
+    entire purpose is not to undercount.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_fan_out_gets_contiguous_positions(self):
+        collector_module._reset_for_tests()
+        s = tetrameter.MemorySink()
+        tetrameter.configure(sink=s, batch_size=1000)
+
+        async def one(i: int) -> None:
+            tetrameter.record(model=f"m{i % 9}", inputTokens=10, outputTokens=2)
+
+        with tetrameter.trace(outcome="audit"):
+            await asyncio.gather(*(one(i) for i in range(99)))
+        tetrameter.flush()
+
+        seqs = sorted(c["seq"] for c in s.calls)
+        assert seqs == list(range(99))
+
+    @pytest.mark.asyncio
+    async def test_identical_concurrent_calls_keep_distinct_ids(self):
+        """Same model, same tokens, same trace, same instant — still distinct."""
+        collector_module._reset_for_tests()
+        s = tetrameter.MemorySink()
+        tetrameter.configure(sink=s, batch_size=1000)
+
+        async def one() -> None:
+            tetrameter.record(
+                model="m", inputTokens=10, outputTokens=2,
+                timestamp="2026-08-03T15:50:00.000000Z",  # collapse the clock
+            )
+
+        with tetrameter.trace(outcome="audit"):
+            await asyncio.gather(*(one() for _ in range(20)))
+        tetrameter.flush()
+
+        ids = [c["id"] for c in s.calls]
+        assert len(set(ids)) == 20, "identical concurrent calls derived a colliding id"
+
+    def test_threads_do_not_interleave_the_counter(self):
+        collector_module._reset_for_tests()
+        s = tetrameter.MemorySink()
+        tetrameter.configure(sink=s, batch_size=1000)
+
+        def one() -> None:
+            tetrameter.record(model="m", inputTokens=1, outputTokens=1)
+
+        with tetrameter.trace(outcome="audit"):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                # A FRESH context copy per submission. Sharing one `Context`
+                # across threads raises "cannot enter context: already entered"
+                # the moment two of them overlap -- which made the first version
+                # of this test flaky rather than failing, because the error went
+                # into a Future nobody read and the records simply never
+                # happened. Results are checked below for the same reason.
+                futures = [
+                    pool.submit(contextvars.copy_context().run, one) for _ in range(200)
+                ]
+                for f in futures:
+                    f.result()
+        tetrameter.flush()
+
+        seqs = sorted(c["seq"] for c in s.calls)
+        assert seqs == list(range(200))
